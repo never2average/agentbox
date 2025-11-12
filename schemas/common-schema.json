@@ -1,0 +1,169 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentBox Common Schema Definitions",
+  "description": "Shared JSON Schema definitions reused across AgentBox component schemas",
+  "version": "1.0.0",
+  "type": "object",
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "Lowercase identifier using [a-z0-9_]"
+    },
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "iso_datetime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "priority": {
+      "enum": ["critical", "high", "medium", "low"]
+    },
+    "email": {
+      "type": "string",
+      "format": "email"
+    },
+    "uri": {
+      "type": "string",
+      "format": "uri"
+    },
+    "secret_ref": {
+      "type": "string",
+      "pattern": "^secret://"
+    },
+    "aws_arn": {
+      "type": "string",
+      "pattern": "^arn:aws:"
+    },
+    "retry_policy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 3
+        },
+        "retry_delay_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60
+        },
+        "backoff_multiplier": {
+          "type": "number",
+          "minimum": 1,
+          "default": 2
+        },
+        "retry_on_status_codes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "default": [500, 502, 503, 504, 429]
+        }
+      },
+      "additionalProperties": false
+    },
+    "auth_type": {
+      "enum": [
+        "none",
+        "bearer",
+        "basic",
+        "api_key",
+        "oauth2",
+        "jwt",
+        "hmac",
+        "iam_role",
+        "service_account",
+        "mutual_tls",
+        "sasl"
+      ]
+    },
+    "http_method": {
+      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+    },
+    "storage_backend": {
+      "enum": [
+        "memory",
+        "persistent",
+        "kafka",
+        "dynamodb",
+        "sqlite",
+        "postgres",
+        "mysql",
+        "redis",
+        "etcd",
+        "firestore",
+        "mongodb",
+        "cassandra",
+        "none"
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "tags": {
+          "$ref": "#/definitions/tags"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "created_at": {
+          "$ref": "#/definitions/iso_datetime"
+        },
+        "updated_at": {
+          "$ref": "#/definitions/iso_datetime"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "comparison_operator": {
+      "enum": ["gt", "gte", "lt", "lte", "eq", "neq", "in", "not_in", "matches", "exists"]
+    },
+    "weekday": {
+      "enum": [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday"
+      ]
+    },
+    "hh_mm_time": {
+      "type": "string",
+      "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+      "description": "24h time format HH:MM"
+    },
+    "throttling_rate_limits": {
+      "type": "object",
+      "properties": {
+        "max_alerts_per_minute": { "type": "integer", "minimum": 0 },
+        "max_alerts_per_hour": { "type": "integer", "minimum": 0 },
+        "max_alerts_per_day": { "type": "integer", "minimum": 0 },
+        "burst_allowance": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}
+

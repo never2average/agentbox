@@ -1,0 +1,217 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentBox Recipe Schema",
+  "description": "JSON Schema for AgentBox recipes (data_processing, model_training, context_management, workflow, custom)",
+  "version": "1.0.0",
+  "type": "object",
+  "definitions": {
+    "recipe_type": {
+      "enum": ["data_processing", "model_training", "context_management", "workflow", "custom"]
+    },
+    "status": {
+      "enum": ["active", "inactive", "deprecated", "draft"]
+    },
+    "core_metadata": {
+      "type": "object",
+      "required": ["recipe_id", "name", "description", "type", "version", "status", "governed_by"],
+      "properties": {
+        "recipe_id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "$ref": "#/definitions/recipe_type" },
+        "version": { "type": "string" },
+        "status": { "$ref": "#/definitions/status" },
+        "governed_by": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "io_schema": {
+      "type": "object"
+    },
+    "io_specification": {
+      "type": "object",
+      "properties": {
+        "inputs": {
+          "type": "object",
+          "properties": {
+            "schema": { "$ref": "#/definitions/io_schema" },
+            "validation": {
+              "type": "object",
+              "properties": {
+                "strict": { "type": "boolean", "default": true },
+                "allow_additional_properties": { "type": "boolean", "default": false }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "type": "object",
+          "properties": {
+            "schema": { "$ref": "#/definitions/io_schema" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "stage": {
+      "type": "object",
+      "required": ["id", "name", "type"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "enum": ["ingest", "transform", "train", "evaluate", "export", "custom"] },
+        "description": { "type": "string" },
+        "inputs": { "type": "object" },
+        "outputs": { "type": "object" },
+        "tool_id": { "type": "string" },
+        "agent_id": { "type": "string" },
+        "runtime_id": { "type": "string" },
+        "params": { "type": "object" },
+        "depends_on": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "execution_definition": {
+      "type": "object",
+      "required": ["stages"],
+      "properties": {
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/stage" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "state_management": {
+      "type": "object",
+      "properties": {
+        "persistent": { "type": "boolean", "default": false },
+        "storage_backend": { "$ref": "./common-schema.json#/definitions/storage_backend" },
+        "storage_connector_id": { "type": "string" },
+        "checkpoint_strategy": { "enum": ["stage_completion", "time_interval", "none"] },
+        "checkpoint_interval_seconds": { "type": "integer", "minimum": 0 },
+        "resumable": { "type": "boolean", "default": false },
+        "resume_from": { "type": "string" },
+        "state_schema": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "concurrency": {
+      "type": "object",
+      "properties": {
+        "max_concurrent_executions": { "type": "integer", "minimum": 1 },
+        "execution_mode": { "enum": ["sequential", "parallel", "hybrid"] },
+        "isolation_level": { "type": "string" },
+        "locking": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "resource_requirements": {
+      "type": "object",
+      "properties": {
+        "compute": { "type": "object" },
+        "storage": { "type": "object" },
+        "network": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "optimization": {
+      "type": "object",
+      "properties": {
+        "caching": { "type": "object" },
+        "performance_optimization": { "type": "object" },
+        "cost_optimization": { "type": "object" },
+        "continuous_improvement": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "observability": {
+      "type": "object",
+      "properties": {
+        "logs": { "type": "object" },
+        "metrics": { "type": "object" },
+        "traces": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "operational": {
+      "type": "object",
+      "properties": {
+        "monitoring": { "type": "object" },
+        "scheduling": { "type": "object" },
+        "cost_tracking": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "dependencies": {
+      "type": "object",
+      "properties": {
+        "required_io_connectors": { "type": "array", "items": { "type": "string" } },
+        "required_tools": { "type": "array", "items": { "type": "string" } },
+        "required_agents": { "type": "array", "items": { "type": "string" } },
+        "required_models": { "type": "array", "items": { "type": "string" } },
+        "required_runtimes": { "type": "array", "items": { "type": "string" } },
+        "optional_connectors": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "allowed_executors": { "type": "array", "items": { "type": "string" } },
+        "requires_approval": { "type": "boolean", "default": false },
+        "approval_required_for": { "type": "array", "items": { "type": "string" } },
+        "approvers": { "type": "array", "items": { "type": "string" } },
+        "data_access_control": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "governance": {
+      "type": "object",
+      "properties": {
+        "policy_ids": { "type": "array", "items": { "type": "string" } },
+        "permissions": { "$ref": "#/definitions/permissions" }
+      },
+      "additionalProperties": false
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "created_at": { "$ref": "./common-schema.json#/definitions/iso_datetime" },
+        "updated_at": { "$ref": "./common-schema.json#/definitions/iso_datetime" },
+        "created_by": { "type": "string" },
+        "version_history": { "type": "array", "items": { "type": "string" } },
+        "tags": { "$ref": "./common-schema.json#/definitions/tags" },
+        "documentation_url": { "$ref": "./common-schema.json#/definitions/uri" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["core_metadata", "execution_definition"],
+  "properties": {
+    "core_metadata": { "$ref": "#/definitions/core_metadata" },
+    "io_specification": { "$ref": "#/definitions/io_specification" },
+    "execution_definition": { "$ref": "#/definitions/execution_definition" },
+    "runtime_configuration": {
+      "type": "object",
+      "properties": {
+        "state_management": { "$ref": "#/definitions/state_management" },
+        "concurrency": { "$ref": "#/definitions/concurrency" },
+        "resource_requirements": { "$ref": "#/definitions/resource_requirements" }
+      },
+      "additionalProperties": false
+    },
+    "optimization": { "$ref": "#/definitions/optimization" },
+    "observability": { "$ref": "#/definitions/observability" },
+    "operational": { "$ref": "#/definitions/operational" },
+    "dependencies": { "$ref": "#/definitions/dependencies" },
+    "governance": { "$ref": "#/definitions/governance" },
+    "metadata": { "$ref": "#/definitions/meta" }
+  },
+  "additionalProperties": false
+}
+

@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentBox Gateways Schema",
+  "description": "Validation schema for LLM gateways and provider/runtime parameters",
+  "version": "1.0.0",
+  "type": "object",
+  "definitions": {
+    "model_mode": {
+      "enum": ["chat", "completion", "embedding"]
+    },
+    "litellm_params": {
+      "type": "object",
+      "required": ["model", "api_base"],
+      "properties": {
+        "model": { "type": "string" },
+        "api_base": { "$ref": "./common-schema.json#/definitions/uri" },
+        "custom_llm_provider": { "type": "string" },
+        "rpm": { "type": "integer", "minimum": 0 },
+        "tpm": { "type": "integer", "minimum": 0 },
+        "timeout": { "type": "integer", "minimum": 1 },
+        "stream": { "type": "boolean", "default": false },
+        "max_tokens": { "type": "integer", "minimum": 1 },
+        "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+        "top_p": { "type": "number", "minimum": 0, "maximum": 1 },
+        "frequency_penalty": { "type": "number", "minimum": 0, "maximum": 2 },
+        "presence_penalty": { "type": "number", "minimum": 0, "maximum": 2 }
+      },
+      "additionalProperties": false
+    },
+    "model_info": {
+      "type": "object",
+      "required": ["id", "mode"],
+      "properties": {
+        "id": { "type": "string" },
+        "mode": { "$ref": "#/definitions/model_mode" },
+        "supports_function_calling": { "type": "boolean", "default": false },
+        "supports_vision": { "type": "boolean", "default": false },
+        "supports_streaming": { "type": "boolean", "default": true }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["model_name", "litellm_params", "model_info"],
+  "properties": {
+    "model_name": { "type": "string" },
+    "litellm_params": { "$ref": "#/definitions/litellm_params" },
+    "model_info": { "$ref": "#/definitions/model_info" }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "model_name": "llama-3-70b-instruct",
+      "litellm_params": {
+        "model": "openai/llama-3-70b-instruct",
+        "api_base": "http://localhost:8000/v1",
+        "custom_llm_provider": "openai",
+        "rpm": 10000,
+        "tpm": 1000000,
+        "timeout": 600,
+        "stream": true,
+        "max_tokens": 8192,
+        "temperature": 0.7,
+        "top_p": 0.95
+      },
+      "model_info": {
+        "id": "llama-3-70b-instruct",
+        "mode": "chat",
+        "supports_function_calling": true,
+        "supports_vision": false,
+        "supports_streaming": true
+      }
+    }
+  ]
+}
+

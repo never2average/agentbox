@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentBox Governance Schema",
+  "description": "Validation schema for governance identities, policy groups, and defaults",
+  "version": "1.0.0",
+  "type": "object",
+  "definitions": {
+    "status": { "enum": ["active", "inactive"] },
+    "identity_type": { "enum": ["user", "role", "service", "tenant", "agent"] },
+    "match_rule": {
+      "type": "object",
+      "required": ["attribute", "op"],
+      "properties": {
+        "attribute": { "type": "string" },
+        "op": { "$ref": "./common-schema.json#/definitions/comparison_operator" },
+        "value": {}
+      },
+      "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "$ref": "#/definitions/identity_type" },
+        "ids": { "type": "array", "items": { "type": "string" } },
+        "roles": { "type": "array", "items": { "type": "string" } },
+        "match": { "type": "array", "items": { "$ref": "#/definitions/match_rule" } },
+        "tags": { "$ref": "./common-schema.json#/definitions/tags" }
+      },
+      "additionalProperties": false
+    },
+    "applies_to": {
+      "type": "object",
+      "properties": {
+        "target_type": { "enum": ["agent", "tool", "gateway", "channel", "hardware", "runtime", "model"] },
+        "target_ids": { "type": "array", "items": { "type": "string" } },
+        "selector": {
+          "type": "object",
+          "properties": {
+            "tags": { "$ref": "./common-schema.json#/definitions/tags" },
+            "attributes_match": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/match_rule" }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "policy_group": {
+      "type": "object",
+      "required": ["group_id", "mode", "priority", "policy_ids"],
+      "properties": {
+        "group_id": { "type": "string" },
+        "name": { "type": "string" },
+        "mode": { "enum": ["enforce", "monitor"] },
+        "priority": { "type": "integer", "minimum": 0, "default": 10 },
+        "conflict_resolution": { "enum": ["deny_overrides", "permit_overrides", "first_match"] },
+        "policy_ids": { "type": "array", "items": { "type": "string" } },
+        "applies_to": { "$ref": "#/definitions/applies_to" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["id", "status"],
+  "properties": {
+    "id": { "$ref": "./common-schema.json#/definitions/id" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "status": { "$ref": "#/definitions/status" },
+    "identity": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/identity" }
+    },
+    "policy_groups": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/policy_group" }
+    },
+    "default_behavior": { "enum": ["deny", "allow", "monitor"] },
+    "inherit_from": { "type": "string" }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "gov_id_1",
+      "name": "Default Governance",
+      "status": "active",
+      "identity": [
+        { "type": "role", "roles": ["admin"], "tags": [] }
+      ],
+      "policy_groups": [
+        {
+          "group_id": "pg_1",
+          "name": "Core Policies",
+          "mode": "enforce",
+          "priority": 10,
+          "conflict_resolution": "deny_overrides",
+          "policy_ids": ["policy_id_1", "policy_id_2"],
+          "applies_to": {
+            "target_type": "agent",
+            "target_ids": [],
+            "selector": { "tags": [] }
+          }
+        }
+      ],
+      "default_behavior": "deny"
+    }
+  ]
+}
+
