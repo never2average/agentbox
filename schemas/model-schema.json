@@ -80,6 +80,65 @@
         "tags": {
           "$ref": "./common-schema.json#/definitions/tags",
           "description": "Free-form labels for discovery."
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 1,
+          "description": "Serving replicas. Ignored while a ModelAutoScaler owns this model."
+        },
+        "serving": {
+          "type": "object",
+          "description": "How to serve this model in-cluster. Omit for a registry-only entry that records what the model is without running anything.",
+          "required": [
+            "image"
+          ],
+          "properties": {
+            "image": {
+              "type": "string",
+              "pattern": "^[a-z0-9]([a-z0-9._\\-/]*[a-z0-9])?(:[\\w][\\w.\\-]{0,127})?(@sha256:[a-f0-9]{64})?$"
+            },
+            "entrypoint": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 64
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 8000
+            },
+            "env": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              }
+            },
+            "compute": {
+              "$ref": "common-schema.json#/definitions/computeResources"
+            },
+            "nodeSelector": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Node labels the serving pods must land on, e.g. a GPU node group."
+            },
+            "health": {
+              "$ref": "#/definitions/health"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [
@@ -87,7 +146,13 @@
         "modelHub",
         "hubModelId"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "x-agentbox-rules": [
+        {
+          "rule": "!has(self.serving) || self.serving.image != ''",
+          "message": "serving.image is required when serving is set"
+        }
+      ]
     },
     "status": {
       "$ref": "common-schema.json#/definitions/resourceStatus"
@@ -266,6 +331,45 @@
           "items": {
             "type": "string"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "health": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "http",
+            "tcp",
+            "exec"
+          ],
+          "default": "http"
+        },
+        "path": {
+          "type": "string",
+          "default": "/healthz"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "initialDelaySeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10
+        },
+        "periodSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30
         }
       },
       "additionalProperties": false

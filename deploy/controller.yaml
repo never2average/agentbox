@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentbox-controller
+  namespace: agentbox-system
+  labels:
+    app.kubernetes.io/part-of: agentbox
+    app.kubernetes.io/name: agentbox-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentbox-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: agentbox
+        app.kubernetes.io/name: agentbox-controller
+    spec:
+      serviceAccountName: agentbox-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: controller
+          image: ghcr.io/never2average/agentbox-controller:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --resync-seconds=60
+            - --workers=4
+          env:
+            # Point this at Prometheus to drive autoscalers, meters and guardrails
+            # from real metrics. Without it, values come from the agentbox-metrics
+            # ConfigMap in each namespace.
+            - name: AGENTBOX_PROMETHEUS_URL
+              value: ""
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

@@ -163,7 +163,8 @@ The other thirteen are configuration.
 
 ```bash
 pip install -r requirements.txt
-kubectl apply -k crds/
+kubectl apply -k crds/     # the 16 CRDs
+kubectl apply -k deploy/   # the controller that reconciles them
 ```
 
 Declare a gateway to a provider, then run an agent image against it:
@@ -213,8 +214,13 @@ kubectl get harnessruntime support-agent
 kubectl scale harnessruntime/support-agent --replicas=5
 ```
 
-`HarnessRuntime` and `ToolServer` expose the scale subresource, so `kubectl scale`,
+`HarnessRuntime`, `ToolServer` and `Model` expose the scale subresource, so `kubectl scale`,
 HPA-style tooling and GitOps diffs all behave the way your team already expects.
+
+The controller turns each object into what it owns: a `HarnessRuntime` into a Deployment and
+Service, a `ToolServer` into those plus a tool catalog its callers can read, an `AgentIdP`
+into a ServiceAccount with a Role, a `Gateway` into routing config, an `AIMeter` into a
+priced usage figure. Watch it work with `kubectl get harnessruntimes -w`.
 
 More: **[docs/quickstart.md](docs/quickstart.md)**.
 
@@ -224,13 +230,15 @@ Honest state of the world, so nobody is surprised:
 
 | | |
 |---|---|
-| ✅ | **16 CRDs**, installable, structural schemas, status + scale subresources, printer columns, 37 CEL validation rules |
-| ✅ | **Python CRUD layer** for every kind, with schema validation, secret extraction and status synthesis |
-| ✅ | **Workload creation** for `HarnessRuntime`, `ToolServer` and `TrainLoop` (Deployments, Services, Jobs, CronJobs) |
-| ✅ | **Verified end to end** against a live API server — 81 assertions covering install, validation, rejection, subresources and the Python managers ([`tests/e2e_test.py`](tests/e2e_test.py)) |
-| 🚧 | **No controller yet.** Nothing reconciles continuously. The autoscaler kinds define the contract; they do not scale anything on their own yet |
+| ✅ | **16 CRDs**, installable, structural schemas, status + scale subresources, printer columns, 38 CEL validation rules |
+| ✅ | **A controller that reconciles all 16 kinds** — watches, builds what each one owns, writes status and conditions, emits events |
+| ✅ | **Autoscaling that works**, on the HorizontalPodAutoscaler formula with a tolerance band, stabilization windows and scale-to-zero |
+| ✅ | **Metering that computes** — flat, per-unit and tiered pricing, budget thresholds, breach events |
+| ✅ | **Python CRUD layer** for every kind, for clusters where you cannot install CRDs |
+| ✅ | **Verified end to end** against a live API server — 122 assertions ([`tests/e2e_test.py`](tests/e2e_test.py)) |
 | 🚧 | **No admission webhook.** Validation happens at the API server via the CRD schemas and CEL rules, not through defaulting/mutating webhooks |
-| 🚧 | **AIMeter is a contract, not a billing engine.** It says how usage is attributed and priced; something still has to compute it |
+| 🚧 | **Guardrail effects are reported, not enforced.** The controller decides whether a guardrail trips and says so in status and events; the gateway or harness still has to act on it |
+| 🚧 | **The controller is single-replica.** No leader election yet, so do not run two |
 
 `v1beta1` is where the field names settle. I will not rename fields under you from here
 without a version bump.
@@ -257,9 +265,11 @@ The reasoning in full: **[docs/design.md](docs/design.md)**.
 
 ```
 schemas/       JSON Schema source of truth, one file per CRD + common definitions
-tests/         End-to-end suite that runs against a real cluster
 crds/          Generated CustomResourceDefinition manifests (kubectl apply -k crds/)
-k8s_modules/   Python CRUD layer: storage, validation, workload managers, registry
+controller/    The reconciler: one function per kind, plus the watch loop
+deploy/        RBAC and Deployment for running the controller in-cluster
+tests/         End-to-end suite that runs against a real cluster
+k8s_modules/   Python CRUD layer: storage, validation, workload builders, registry
 agents/        Cluster-inspection agents used by the ai-ctl CLI
 tools/         Generators for crds/ and docs/crd-reference.md
 docs/          Reference, architecture, design notes, Python and CLI guides
@@ -282,6 +292,7 @@ python tools/generate_crd_docs.py
 - [ai-ctl](docs/ai-ctl.md) — the cluster-inspection CLI that ships alongside
 - [CLI integration](docs/cli-integration.md) — wiring the managers into `ai-ctl`
 - [Migration](docs/migration.md) — how the earlier schema set maps onto these CRDs
+- [Controller](docs/controller.md) — what each kind reconciles into, and how to run it
 - [Contributing](CONTRIBUTING.md)
 
 ## Contributing
@@ -294,4 +305,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

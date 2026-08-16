@@ -16,7 +16,8 @@ an autoscaler.
 git clone <this repo>
 cd agentbox
 pip install -r requirements.txt
-kubectl apply -k crds/
+kubectl apply -k crds/      # the 16 CRDs
+kubectl apply -k deploy/    # the controller that reconciles them
 ```
 
 Check what landed:
@@ -184,9 +185,19 @@ spec:
     drainTimeoutSeconds: 300
 ```
 
-> **Note:** no controller ships with this repository yet, so this object records intent
-> and validates — it does not scale anything on its own. See
-> [Status](../README.md#status).
+The controller reads `pending-agent-sessions`, applies the HorizontalPodAutoscaler formula
+with a 10% tolerance band, and patches `spec.replicas` on the harness — which its own
+reconciler then rolls out to the Deployment. Watch the decision:
+
+```bash
+kubectl get harnessswarmautoscaler support-agent-swarm -o jsonpath='{.status}' | jq
+```
+
+Before you have a metrics pipeline, pin the value by hand:
+
+```bash
+kubectl create configmap agentbox-metrics --from-literal=pending-agent-sessions=25
+```
 
 ## 6. Put a budget on it
 
@@ -219,7 +230,15 @@ spec:
 ```
 
 This is the object I most wanted to exist. "What did agents cost us last month, by tenant"
-should be a `kubectl get`, not a data pull.
+should be a `kubectl get`, not a data pull — and it is:
+
+```bash
+kubectl get aimeter tenant-token-spend \
+  -o jsonpath='{.status.currentUsage} tokens = {.status.currentCost} USD ({.status.budgetUsedPercent}% of budget)'
+```
+
+The controller prices flat, per-unit and tiered models, emits a `BudgetThreshold` event at
+each alert percentage and `BudgetExceeded` when the limit is passed.
 
 ## Without CRDs
 
@@ -250,4 +269,5 @@ need them. Full guide: [python-api.md](python-api.md).
 
 - [CRD reference](crd-reference.md) — every field of every kind
 - [Architecture](architecture.md) — how this maps onto a real cluster
+- [Controller](controller.md) — what each kind reconciles into
 - [Design](design.md) — why the set looks like this

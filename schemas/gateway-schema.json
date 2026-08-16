@@ -46,6 +46,65 @@
         "modelInfo": {
           "$ref": "#/definitions/modelInfo",
           "description": "Capabilities advertised to callers: mode, function calling, vision, streaming."
+        },
+        "serving": {
+          "type": "object",
+          "description": "How to run the gateway in-cluster. Omit to publish the routing config for a gateway you already run.",
+          "required": [
+            "image"
+          ],
+          "properties": {
+            "image": {
+              "type": "string",
+              "pattern": "^[a-z0-9]([a-z0-9._\\-/]*[a-z0-9])?(:[\\w][\\w.\\-]{0,127})?(@sha256:[a-f0-9]{64})?$"
+            },
+            "entrypoint": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 64
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 4000
+            },
+            "env": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              }
+            },
+            "compute": {
+              "$ref": "common-schema.json#/definitions/computeResources"
+            },
+            "nodeSelector": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Node labels the serving pods must land on, e.g. a GPU node group."
+            },
+            "health": {
+              "$ref": "#/definitions/health"
+            }
+          },
+          "additionalProperties": false
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 1,
+          "description": "Gateway replicas, when serving is set."
         }
       },
       "required": [
@@ -160,6 +219,45 @@
         "supportsStreaming": {
           "type": "boolean",
           "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "health": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "http",
+            "tcp",
+            "exec"
+          ],
+          "default": "http"
+        },
+        "path": {
+          "type": "string",
+          "default": "/healthz"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "initialDelaySeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10
+        },
+        "periodSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30
         }
       },
       "additionalProperties": false

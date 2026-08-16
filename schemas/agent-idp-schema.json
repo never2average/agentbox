@@ -146,6 +146,13 @@
         },
         "tags": {
           "$ref": "./common-schema.json#/definitions/tags"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Annotations projected onto the ServiceAccount, e.g. an IRSA role ARN."
         }
       },
       "additionalProperties": false

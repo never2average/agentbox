@@ -106,6 +106,11 @@ spec:
                       type: array
                       items:
                         type: string
+                    annotations:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: Annotations projected onto the ServiceAccount, e.g. an IRSA role ARN.
                 description: 'Identity matchers: which roles, service accounts or tags this applies to.'
               policyGroups:
                 type: array

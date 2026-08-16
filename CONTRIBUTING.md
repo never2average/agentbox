@@ -77,8 +77,11 @@ If it clears the bar:
    creates Kubernetes workloads.
 3. Add printer columns and a one-liner to `tools/generate_crds.py` and
    `tools/generate_crd_docs.py`.
-4. Add the group to `PLANES` in the docs generator.
-5. Regenerate, and add it to `crds/kustomization.yaml`.
+4. Write a reconciler in `controller/reconcilers/` and register it in
+   `controller/manager.py`. A reconciler takes `(ctx, resource)` and returns the status to
+   write; build children with `controller.children` so they carry owner references.
+5. Add the group to `PLANES` in the docs generator.
+6. Regenerate, and add it to `crds/kustomization.yaml`.
 
 Removing a CRD is just as welcome, and needs the same kind of argument.
 
@@ -102,9 +105,10 @@ and registry agree — that is the point.
 ### End-to-end
 
 `tests/e2e_test.py` runs the whole loop against a real API server: installs the CRDs,
-applies every reference example, checks that 16 bad specs are rejected, exercises the
-scale and status subresources, and drives the Python managers through CRUD plus real
-workload creation. 81 assertions.
+applies every reference example, checks that 16 bad specs are rejected, exercises the scale
+and status subresources, drives the Python managers through CRUD, and runs the controller —
+asserting that it builds every child with the right owner, scales targets by the HPA
+formula, prices usage against budgets and trips guardrails. 122 assertions.
 
 ```bash
 kind create cluster --name agentbox-e2e --kubeconfig /tmp/agentbox-kubeconfig

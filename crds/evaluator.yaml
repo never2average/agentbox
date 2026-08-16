@@ -154,6 +154,10 @@ spec:
               runConfig:
                 type: object
                 properties:
+                  image:
+                    type: string
+                    pattern: ^[a-z0-9]([a-z0-9._\-/]*[a-z0-9])?(:[\w][\w.\-]{0,127})?(@sha256:[a-f0-9]{64})?$
+                    description: Image that executes this suite when a run is requested.
                   seed:
                     type: integer
                     minimum: 0

@@ -46,6 +46,12 @@ A model the platform can serve or call: where the weights come from, what the mo
 | `supportsFunctionCalling` | boolean |  | Whether the model supports tool/function calling. |
 | `modalities` | `modalities` |  | Input and output modalities the model accepts. |
 | `tags` | object |  | Free-form labels for discovery. |
+| `replicas` | integer |  | Serving replicas. Ignored while a ModelAutoScaler owns this model. |
+| `serving` | object |  | How to serve this model in-cluster. Omit for a registry-only entry that records what the model is without running anything. |
+
+Enforced by the API server as CEL validation rules:
+
+- serving.image is required when serving is set
 
 ```yaml
 apiVersion: ai.agentbox.io/v1beta1
@@ -387,6 +393,8 @@ Routes model traffic to a provider, with rate limits and per-model parameters.
 | `modelName` | string | yes | Name callers use when routing through this gateway. |
 | `litellmParams` | `litellmParams` | yes | Upstream provider, credentials and per-model runtime parameters. |
 | `modelInfo` | `modelInfo` | yes | Capabilities advertised to callers: mode, function calling, vision, streaming. |
+| `serving` | object |  | How to run the gateway in-cluster. Omit to publish the routing config for a gateway you already run. |
+| `replicas` | integer |  | Gateway replicas, when serving is set. |
 
 ```yaml
 apiVersion: ai.agentbox.io/v1beta1

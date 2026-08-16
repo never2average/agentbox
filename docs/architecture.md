@@ -117,10 +117,22 @@ Every AgentBox object is stored twice over, depending on how you use it:
 Both paths use the same schemas, so a spec that validates in one validates in the other.
 See [python-api.md](python-api.md).
 
+## The controller
+
+`controller/` watches all 16 kinds and reconciles each into what it owns. It runs as a
+single Deployment in `agentbox-system` with a ClusterRole scoped to the AgentBox group and
+the resources it creates.
+
+Every child carries an owner reference back to its AgentBox object, so deleting a
+`HarnessRuntime` takes its Deployment and Service with it — the garbage collector does the
+work, and there are no finalizers to get stuck.
+
+See [controller.md](controller.md) for what each kind produces.
+
 ## What is not here yet
 
-There is no controller. Nothing watches these objects and reconciles them continuously —
-today the Python managers create workloads when you call them, and the autoscaler kinds
-describe a contract that nothing implements. That is the next thing to build, and the CRDs
-are shaped the way they are so that a controller can be written against them without
-changing the API.
+- **No admission webhook.** Validation is the CRD schema and its CEL rules; there is no
+  defaulting or mutating webhook.
+- **Guardrail effects are reported, not enforced.** The controller evaluates conditions and
+  records the verdict; acting on it belongs to the gateway or the harness.
+- **The controller is single-replica.** There is no leader election yet.

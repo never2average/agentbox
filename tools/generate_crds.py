@@ -36,6 +36,7 @@ ALLOWED_FORMATS = {"date", "date-time", "duration", "email", "hostname",
 SCALABLE = {
     "HarnessRuntime": ".spec.replicas",
     "ToolServer": ".spec.replicas",
+    "Model": ".spec.replicas",
 }
 
 PRINTER_COLUMNS = {

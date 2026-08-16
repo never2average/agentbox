@@ -491,6 +491,208 @@ def test_python_secrets(context, namespace, kubeconfig):
     return ok
 
 
+
+
+# --------------------------------------------------------------------------- 8
+def _run_controller(kubeconfig, namespace):
+    """Reconcile everything once, in-process."""
+    sys.path.insert(0, str(ROOT))
+    from controller.context import Context
+    from controller.manager import Manager
+
+    manager = Manager(Context(kubeconfig=kubeconfig, namespace=namespace))
+    return manager.run_once()
+
+
+def _pin_metrics(context, namespace, values):
+    """Pin metric values the controller will read."""
+    body = {
+        "apiVersion": "v1", "kind": "ConfigMap",
+        "metadata": {"name": "agentbox-metrics", "namespace": namespace},
+        "data": {k: str(v) for k, v in values.items()},
+    }
+    kubectl("apply", "-n", namespace, "-f", "-", context=context,
+            input_text=json.dumps(body))
+
+
+def _spec_replicas(context, namespace, plural, name):
+    _, out, _ = kubectl("get", plural, name, "-n", namespace,
+                        "-o", "jsonpath={.spec.replicas}", context=context)
+    return int(out.strip() or 0)
+
+
+def _status_of(context, namespace, plural, name):
+    _, out, _ = kubectl("get", plural, name, "-n", namespace, "-o", "json", context=context)
+    return json.loads(out).get("status", {})
+
+
+def test_controller_reconciles(context, namespace, kubeconfig):
+    """Every kind reconciles, and the workload kinds build real objects."""
+    result = _run_controller(kubeconfig, namespace)
+    ok = record(f"controller reconciles all kinds ({result['reconciled']}/{result['resources']})",
+                PASS if result["failures"] == 0 and result["reconciled"] == result["resources"]
+                else FAIL, json.dumps(result))
+
+    for resource, name, owner in [
+        ("deployment", "api-harness", "HarnessRuntime"),
+        ("service", "api-harness", "HarnessRuntime"),
+        ("deployment", "summarize-text", "ToolServer"),
+        ("service", "summarize-text", "ToolServer"),
+        ("cronjob", "sft-nightly", "TrainLoop"),
+        ("configmap", "summarize-text-tools", "ToolServer"),
+        ("configmap", "openai-compatible-config", "Gateway"),
+        ("configmap", "orders-stream-connector", "Dataset"),
+        ("configmap", "otel-default-otel", "Tracer"),
+        ("configmap", "request-latency-rule", "AIMetric"),
+        ("configmap", "nightly-sft-plan", "Recipe"),
+        ("configmap", "summarization-accuracy-suite", "Evaluator"),
+        ("serviceaccount", "default-idp", "AgentIdP"),
+        ("role", "default-idp", "AgentIdP"),
+        ("rolebinding", "default-idp", "AgentIdP"),
+    ]:
+        code, out, err = kubectl("get", resource, name, "-n", namespace, "-o", "json",
+                                 context=context, check=False)
+        if code != 0:
+            ok &= record(f"controller creates {resource}/{name}", FAIL, err.strip()[:140])
+            continue
+        refs = json.loads(out)["metadata"].get("ownerReferences", [])
+        owned = any(r["kind"] == owner and r.get("controller") for r in refs)
+        ok &= record(f"controller creates {resource}/{name} owned by {owner}",
+                     PASS if owned else FAIL, f"ownerReferences: {refs}")
+
+    # the tool catalog is how an agent discovers a tool server
+    _, out, _ = kubectl("get", "configmap", "summarize-text-tools", "-n", namespace,
+                        "-o", "jsonpath={.data.catalog\\.json}", context=context)
+    catalog = json.loads(out)
+    tool = catalog["tools"][0]
+    ok &= record("tool catalog resolves a callable URL",
+                 PASS if tool["url"].startswith(f"http://summarize-text.{namespace}.svc:8080")
+                 else FAIL, tool["url"])
+    return ok
+
+
+def test_controller_status(context, namespace, kubeconfig):
+    """Status carries state, conditions and the fields each kind promises."""
+    ok = True
+    expectations = [
+        ("harnessruntimes", "api-harness", ["replicas", "readyReplicas", "selector", "endpoints"]),
+        ("toolservers", "summarize-text", ["tools", "catalogConfigMap", "address"]),
+        ("gateways", "openai-compatible", ["configMap", "upstream"]),
+        ("datasets", "orders-stream", ["connectorConfigMap", "address"]),
+        ("recipes", "nightly-sft", ["resolvedOrder", "stageCount"]),
+        ("agentidps", "default-idp", ["serviceAccount", "role"]),
+        ("tracers", "otel-default", ["collectorConfigMap"]),
+        ("aimetrics", "request-latency", ["ruleConfigMap", "metricName"]),
+        ("evaluators", "summarization-accuracy", ["suiteConfigMap", "caseCount"]),
+    ]
+    for plural, name, fields in expectations:
+        status_block = _status_of(context, namespace, plural, name)
+        missing = [f for f in fields if f not in status_block]
+        has_conditions = bool(status_block.get("conditions"))
+        ok &= record(f"status of {plural}/{name}",
+                     PASS if not missing and has_conditions else FAIL,
+                     f"missing {missing}, conditions={has_conditions}")
+
+    order = _status_of(context, namespace, "recipes", "nightly-sft")["resolvedOrder"]
+    ok &= record("recipe resolves its stage order",
+                 PASS if order == ["ingest", "train"] else FAIL, str(order))
+    return ok
+
+
+def test_controller_scaling(context, namespace, kubeconfig):
+    """Autoscalers move their targets by the HPA formula, and hold inside tolerance."""
+    ok = True
+
+    # api-harness sits at 2 replicas; 25 sessions per replica against a target of
+    # 5 is 5x over, so the swarm should land on 10.
+    kubectl("patch", "harnessruntimes", "api-harness", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"replicas": 2}}), context=context)
+    kubectl("patch", "models", "llama-3-70b-instruct", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"replicas": 1}}), context=context)
+    _pin_metrics(context, namespace, {
+        "pending-agent-sessions": 25,
+        "inference-queue-depth": 60,
+        "tool-call-rate": 200,
+        "gateway-tokens": 2_000_000_000,
+        "request-rate": 1500,
+    })
+    _run_controller(kubeconfig, namespace)
+
+    ok &= record("swarm autoscaler scales the harness 2 -> 10",
+                 PASS if _spec_replicas(context, namespace, "harnessruntimes", "api-harness") == 10
+                 else FAIL, str(_spec_replicas(context, namespace, "harnessruntimes", "api-harness")))
+    ok &= record("model autoscaler scales the model 1 -> 3",
+                 PASS if _spec_replicas(context, namespace, "models", "llama-3-70b-instruct") == 3
+                 else FAIL, str(_spec_replicas(context, namespace, "models", "llama-3-70b-instruct")))
+
+    # inside the tolerance band nothing moves
+    kubectl("patch", "models", "llama-3-70b-instruct", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"replicas": 3}}), context=context)
+    _pin_metrics(context, namespace, {"inference-queue-depth": 21, "gateway-tokens": 1})
+    _run_controller(kubeconfig, namespace)
+    ok &= record("autoscaler holds inside the tolerance band",
+                 PASS if _spec_replicas(context, namespace, "models", "llama-3-70b-instruct") == 3
+                 else FAIL, str(_spec_replicas(context, namespace, "models", "llama-3-70b-instruct")))
+
+    autoscaler = _status_of(context, namespace, "modelautoscalers", "llama-3-70b-autoscaler")
+    ok &= record("autoscaler reports its observations",
+                 PASS if autoscaler.get("metrics") and "currentReplicas" in autoscaler else FAIL,
+                 json.dumps(autoscaler)[:180])
+
+    # the scale reaches the Deployment
+    _run_controller(kubeconfig, namespace)
+    _, out, _ = kubectl("get", "deployment", "api-harness", "-n", namespace,
+                        "-o", "jsonpath={.spec.replicas}", context=context)
+    ok &= record("the scaled replica count reaches the Deployment",
+                 PASS if out.strip() == "10" else FAIL, f"deployment replicas={out.strip()}")
+    return ok
+
+
+def test_controller_metering_and_guardrails(context, namespace, kubeconfig):
+    """Meters price usage against a budget; guardrails trip on their conditions."""
+    ok = True
+    _pin_metrics(context, namespace, {"gateway-tokens": 2_000_000_000, "request-rate": 1500})
+    _run_controller(kubeconfig, namespace)
+
+    meter = _status_of(context, namespace, "aimeters", "tenant-token-spend")
+    ok &= record("meter prices usage (2e9 tokens -> 1200 USD)",
+                 PASS if meter.get("currentCost") == 1200 else FAIL, json.dumps(meter)[:180])
+    ok &= record("meter reports budget headroom (24%)",
+                 PASS if meter.get("budgetUsedPercent") == 24 and not meter.get("budgetExceeded")
+                 else FAIL, json.dumps(meter)[:180])
+
+    guardrail = _status_of(context, namespace, "guardrails", "throttle-high-rps")
+    ok &= record("guardrail trips when its condition is met",
+                 PASS if guardrail.get("triggered") is True else FAIL, json.dumps(guardrail)[:180])
+
+    _pin_metrics(context, namespace, {"gateway-tokens": 10_000_000_000, "request-rate": 10})
+    _run_controller(kubeconfig, namespace)
+
+    meter = _status_of(context, namespace, "aimeters", "tenant-token-spend")
+    ok &= record("meter flags a breached budget",
+                 PASS if meter.get("budgetExceeded") is True else FAIL, json.dumps(meter)[:180])
+
+    guardrail = _status_of(context, namespace, "guardrails", "throttle-high-rps")
+    ok &= record("guardrail clears when the condition passes",
+                 PASS if guardrail.get("triggered") is False else FAIL, json.dumps(guardrail)[:180])
+
+    _, out, _ = kubectl("get", "events", "-n", namespace, "-o", "json", context=context)
+    reasons = {e["reason"] for e in json.loads(out)["items"]}
+    for reason in ("Scaled", "BudgetExceeded", "GuardrailTripped"):
+        ok &= record(f"controller emits the {reason} event",
+                     PASS if reason in reasons else FAIL, f"saw {sorted(reasons)}")
+    return ok
+
+
+def test_controller_idempotent(context, namespace, kubeconfig):
+    """A second pass over unchanged resources must not fail or thrash."""
+    first = _run_controller(kubeconfig, namespace)
+    second = _run_controller(kubeconfig, namespace)
+    return record("reconciling twice is stable",
+                  PASS if first["failures"] == 0 and second["failures"] == 0 else FAIL,
+                  f"{first} then {second}")
+
+
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
@@ -532,6 +734,16 @@ def main():
         ("python CRUD", test_python_managers, (args.context, args.namespace, args.kubeconfig)),
         ("python workloads", test_python_workloads, (args.context, args.namespace, args.kubeconfig)),
         ("python secrets", test_python_secrets, (args.context, args.namespace, args.kubeconfig)),
+        ("controller reconcile", test_controller_reconciles,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller status", test_controller_status,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller scaling", test_controller_scaling,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller metering", test_controller_metering_and_guardrails,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller idempotence", test_controller_idempotent,
+         (args.context, args.namespace, args.kubeconfig)),
     ]
 
     try:
