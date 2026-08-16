@@ -121,6 +121,11 @@ It creates a dedicated namespace and removes it, and the CRDs, at the end. `--ku
 is required — the suite refuses to guess, so it can never wander onto a cluster you did
 not name. CI runs it on every PR against a kind cluster.
 
+`checks that 16 bad specs are rejected` is 26 now, and the count moves — what matters is
+the catalogue in [docs/test-cases.md](docs/test-cases.md), which lists every case worth
+running and marks what is automated. If you are looking for a first contribution, pick an
+unmarked case from there; the priorities are listed at the bottom of that page.
+
 Before opening a PR:
 
 ```bash

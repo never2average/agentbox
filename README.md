@@ -293,6 +293,7 @@ python tools/generate_crd_docs.py
 - [CLI integration](docs/cli-integration.md) — wiring the managers into `ai-ctl`
 - [Migration](docs/migration.md) — how the earlier schema set maps onto these CRDs
 - [Controller](docs/controller.md) — what each kind reconciles into, and how to run it
+- [Test cases](docs/test-cases.md) — the full catalogue, and what is automated so far
 - [Contributing](CONTRIBUTING.md)
 
 ## Contributing
