@@ -1,0 +1,188 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/gateway-schema.json",
+  "title": "AgentBox Gateway",
+  "description": "Serving-plane LLM gateway: provider routing, rate limits and per-model runtime parameters.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "Gateway",
+    "scope": "Namespaced",
+    "shortNames": [
+      "gw"
+    ],
+    "slug": "gateway",
+    "plural": "gateways"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "Gateway"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "modelName": {
+          "type": "string",
+          "description": "Name callers use when routing through this gateway."
+        },
+        "litellmParams": {
+          "$ref": "#/definitions/litellmParams",
+          "description": "Upstream provider, credentials and per-model runtime parameters."
+        },
+        "modelInfo": {
+          "$ref": "#/definitions/modelInfo",
+          "description": "Capabilities advertised to callers: mode, function calling, vision, streaming."
+        }
+      },
+      "required": [
+        "modelName",
+        "litellmParams",
+        "modelInfo"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "modelMode": {
+      "enum": [
+        "chat",
+        "completion",
+        "embedding"
+      ]
+    },
+    "litellmParams": {
+      "type": "object",
+      "required": [
+        "model",
+        "apiBase"
+      ],
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "apiBase": {
+          "$ref": "./common-schema.json#/definitions/uri"
+        },
+        "apiKey": {
+          "type": "string"
+        },
+        "apiVersion": {
+          "type": "string"
+        },
+        "customLlmProvider": {
+          "type": "string"
+        },
+        "rpm": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "tpm": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "stream": {
+          "type": "boolean",
+          "default": false
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "topP": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "frequencyPenalty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "presencePenalty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        }
+      },
+      "additionalProperties": false
+    },
+    "modelInfo": {
+      "type": "object",
+      "required": [
+        "id",
+        "mode"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/definitions/modelMode"
+        },
+        "supportsFunctionCalling": {
+          "type": "boolean",
+          "default": false
+        },
+        "supportsVision": {
+          "type": "boolean",
+          "default": false
+        },
+        "supportsStreaming": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "Gateway",
+      "metadata": {
+        "name": "openai-compatible"
+      },
+      "spec": {
+        "modelName": "llama-3-70b-instruct",
+        "litellmParams": {
+          "model": "openai/llama-3-70b-instruct",
+          "apiBase": "http://localhost:8000/v1"
+        },
+        "modelInfo": {
+          "id": "llama-3-70b-instruct",
+          "mode": "chat"
+        }
+      }
+    }
+  ]
+}

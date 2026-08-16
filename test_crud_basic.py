@@ -21,11 +21,14 @@ def test_imports():
         from k8s_modules.resources.config_only import ConfigOnlyResourceManager
         print("  ✓ ConfigOnlyResourceManager")
         
-        from k8s_modules.resources.runtimes import RuntimesManager
-        print("  ✓ RuntimesManager")
+        from k8s_modules.resources.harness_runtime import HarnessRuntimeManager
+        print("  ✓ HarnessRuntimeManager")
         
-        from k8s_modules.resources.background import BackgroundManager
-        print("  ✓ BackgroundManager")
+        from k8s_modules.resources.tool_server import ToolServerManager
+        print("  ✓ ToolServerManager")
+        
+        from k8s_modules.resources.train_loop import TrainLoopManager
+        print("  ✓ TrainLoopManager")
         
         from k8s_modules.registry import (
             get_manager,
@@ -99,10 +102,10 @@ def test_resource_store_utilities():
     print("  ✓ extract_secret_fields")
     
     # Test labels
-    labels = create_resource_labels("runtimes", "my-runtime")
+    labels = create_resource_labels("harness-runtime", "my-harness")
     assert labels["app.kubernetes.io/part-of"] == "agentbox"
-    assert labels["agentbox.io/resource-group"] == "runtimes"
-    assert labels["agentbox.io/resource-name"] == "my-runtime"
+    assert labels["agentbox.io/resource-group"] == "harness-runtime"
+    assert labels["agentbox.io/resource-name"] == "my-harness"
     print("  ✓ create_resource_labels")
     
     return True
@@ -112,14 +115,17 @@ def test_registry():
     """Test registry functions."""
     print("\nTesting registry...")
     
-    from k8s_modules.registry import list_resource_groups
+    from k8s_modules.registry import list_resource_groups, CRD_KINDS, get_kind
     
     groups = list_resource_groups()
-    assert "runtimes" in groups
-    assert "agents" in groups
-    assert "background" in groups
-    assert "channels" in groups
-    assert "models" in groups
+    assert set(groups) == set(CRD_KINDS)
+    for group in ["model", "model-autoscaler", "harness-runtime",
+                  "harness-swarm-autoscaler", "agent-idp", "tool-server",
+                  "tool-server-autoscaler", "gateway", "ai-metric", "ai-meter",
+                  "train-loop", "dataset", "evaluator", "guardrail", "tracer",
+                  "recipe"]:
+        assert group in groups, f"missing CRD group: {group}"
+    assert get_kind("harness-runtime") == "HarnessRuntime"
     print(f"  ✓ list_resource_groups ({len(groups)} groups)")
     
     # Print all available groups
@@ -143,6 +149,8 @@ def test_schema_loading():
         print("  ✗ schemas directory not found")
         return False
     
+    from k8s_modules.registry import CRD_KINDS
+    
     schemas_found = 0
     for schema_file in schema_dir.glob("*-schema.json"):
         try:
@@ -154,6 +162,27 @@ def test_schema_loading():
             return False
     
     print(f"  ✓ Successfully loaded {schemas_found} schemas")
+    
+    # Every CRD group has a schema, and it declares the matching kind
+    for group, kind in CRD_KINDS.items():
+        schema_file = schema_dir / f"{group}-schema.json"
+        if not schema_file.exists():
+            print(f"  ✗ Missing schema for {group}")
+            return False
+        
+        with open(schema_file, 'r') as f:
+            schema = json.load(f)
+        
+        crd = schema.get("x-agentbox-crd", {})
+        if crd.get("kind") != kind:
+            print(f"  ✗ {schema_file.name} declares kind {crd.get('kind')}, expected {kind}")
+            return False
+        
+        if schema["properties"]["kind"]["const"] != kind:
+            print(f"  ✗ {schema_file.name} kind const does not match {kind}")
+            return False
+    
+    print(f"  ✓ All {len(CRD_KINDS)} CRD schemas declare their kind")
     return True
 
 
@@ -172,26 +201,22 @@ def test_name_extraction():
     
     mgr = TestManager()
     
-    # Test various name fields
-    spec1 = {"metadata": {"runtime_id": "rt-1"}}
-    assert mgr._extract_name(spec1) == "rt-1"
-    print("  ✓ Extract from metadata.runtime_id")
-    
-    spec2 = {"metadata": {"id": "id-1"}}
-    assert mgr._extract_name(spec2) == "id-1"
-    print("  ✓ Extract from metadata.id")
-    
-    spec3 = {"metadata": {"name": "name-1"}}
-    assert mgr._extract_name(spec3) == "name-1"
+    # Name always comes from the standard envelope
+    spec1 = {"metadata": {"name": "api-harness"}}
+    assert mgr._extract_name(spec1) == "api-harness"
     print("  ✓ Extract from metadata.name")
     
-    spec4 = {"id": "id-2"}
-    assert mgr._extract_name(spec4) == "id-2"
-    print("  ✓ Extract from id")
+    spec2 = {"metadata": {"name": "My_Harness-ID"}}
+    assert mgr._extract_name(spec2) == "my-harness-id"
+    print("  ✓ Sanitizes metadata.name")
     
-    spec5 = {"name": "name-2"}
-    assert mgr._extract_name(spec5) == "name-2"
-    print("  ✓ Extract from name")
+    spec3 = {"kind": "HarnessRuntime", "spec": {"runtime_kind": "server"}}
+    try:
+        mgr._extract_name(spec3)
+        print("  ✗ Should have raised error for missing metadata.name")
+        return False
+    except ValueError:
+        print("  ✓ Rejects spec without metadata.name")
     
     try:
         mgr._extract_name({})

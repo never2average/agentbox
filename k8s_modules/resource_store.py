@@ -93,19 +93,53 @@ def delete_value_at_path(data: Dict[str, Any], path: str) -> None:
         del current[keys[-1]]
 
 
+# Field names that hold credentials, in normalized snake_case form
+SECRET_FIELD_NAMES = frozenset([
+    'password', 'passwd', 'secret', 'token', 'credential', 'credentials',
+    'api_key', 'apikey', 'access_key', 'secret_key', 'private_key',
+    'secret_access_key', 'auth_token', 'bearer_token', 'client_secret',
+    'signing_key', 'encryption_key', 'session_key', 'webhook_secret',
+])
+
+SECRET_FIELD_SUFFIXES = (
+    '_password', '_passwd', '_secret', '_token', '_credential', '_credentials',
+    '_api_key', '_apikey', '_access_key', '_secret_key', '_private_key',
+    '_auth_token', '_signing_key', '_encryption_key',
+)
+
+
+def normalize_field_name(field_name: str) -> str:
+    """
+    Normalize a field name to snake_case so camelCase and snake_case match alike.
+
+    Args:
+        field_name: Field name in any casing (apiKey, api_key, APIKey)
+
+    Returns:
+        Lowercase snake_case form of the name
+    """
+    normalized = re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', field_name)
+    normalized = re.sub(r'(?<=[A-Z])(?=[A-Z][a-z])', '_', normalized)
+    return normalized.replace('-', '_').lower()
+
+
 def is_secret_field_by_convention(field_name: str) -> bool:
     """
     Check if a field name suggests it contains sensitive data.
-    
+
+    Matches camelCase and snake_case equally, and deliberately does not match
+    names that merely contain "key" or "token" — stateKey and totalTokens are
+    not credentials.
+
     Args:
         field_name: Field name to check
-        
+
     Returns:
         True if field name suggests sensitive data
     """
-    sensitive_suffixes = ['password', 'token', 'secret', '_key', 'api_key', 'credentials']
-    field_lower = field_name.lower()
-    return any(field_lower.endswith(suffix) or suffix in field_lower for suffix in sensitive_suffixes)
+    normalized = normalize_field_name(field_name)
+    return (normalized in SECRET_FIELD_NAMES
+            or normalized.endswith(SECRET_FIELD_SUFFIXES))
 
 
 def extract_secret_fields(spec: Dict[str, Any], explicit_paths: Optional[List[str]] = None) -> Tuple[Dict[str, Any], Dict[str, str]]:

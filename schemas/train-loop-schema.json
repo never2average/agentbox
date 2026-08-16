@@ -1,0 +1,592 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/train-loop-schema.json",
+  "title": "AgentBox TrainLoop",
+  "description": "Training-plane training loop: worker definition, schedule, dataset bindings and lifecycle.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "TrainLoop",
+    "scope": "Namespaced",
+    "shortNames": [
+      "tl"
+    ],
+    "slug": "train-loop",
+    "plural": "trainloops"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "TrainLoop"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable name for this loop."
+        },
+        "description": {
+          "type": "string",
+          "description": "What this loop trains or evaluates."
+        },
+        "type": {
+          "$ref": "#/definitions/bgType",
+          "description": "What kind of work this loop performs."
+        },
+        "version": {
+          "type": "string",
+          "description": "Version of this loop's definition."
+        },
+        "status": {
+          "$ref": "#/definitions/status",
+          "description": "Whether the loop is running, paused or stopped."
+        },
+        "worker": {
+          "$ref": "#/definitions/worker",
+          "description": "The image that performs the work, and the compute it needs."
+        },
+        "execution": {
+          "$ref": "#/definitions/execution",
+          "description": "When and how the loop runs: continuously, on a schedule, or on an event."
+        },
+        "stateManagement": {
+          "$ref": "#/definitions/stateManagement",
+          "description": "Where checkpoints and run state are stored."
+        },
+        "lifecycle": {
+          "$ref": "#/definitions/lifecycle",
+          "description": "Pause, resume and restart behaviour."
+        },
+        "health": {
+          "$ref": "#/definitions/health",
+          "description": "Metrics watched to decide whether the loop is healthy."
+        },
+        "observability": {
+          "$ref": "#/definitions/observability",
+          "description": "Logging, tracing and metric emission for runs."
+        },
+        "permissions": {
+          "$ref": "#/definitions/permissions",
+          "description": "Who may start, pause and inspect this loop."
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Free-form annotations."
+        }
+      },
+      "required": [
+        "type",
+        "version",
+        "status",
+        "worker",
+        "execution"
+      ],
+      "additionalProperties": false,
+      "x-agentbox-rules": [
+        {
+          "rule": "self.execution.mode != 'scheduled' || has(self.execution.schedule)",
+          "message": "execution.schedule is required when execution.mode is scheduled"
+        }
+      ]
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "bgType": {
+      "enum": [
+        "training",
+        "dataProcessing",
+        "alertManager",
+        "scheduledTask"
+      ]
+    },
+    "status": {
+      "enum": [
+        "active",
+        "paused",
+        "stopped",
+        "error"
+      ]
+    },
+    "worker": {
+      "type": "object",
+      "required": [
+        "image"
+      ],
+      "properties": {
+        "image": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9._\\-/]*[a-z0-9])?(:[\\w][\\w.\\-]{0,127})?(@sha256:[a-f0-9]{64})?$"
+        },
+        "entrypoint": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "compute": {
+          "$ref": "common-schema.json#/definitions/computeResources"
+        }
+      },
+      "additionalProperties": false
+    },
+    "scheduleType": {
+      "enum": [
+        "cron",
+        "interval",
+        "manual"
+      ]
+    },
+    "execution": {
+      "type": "object",
+      "required": [
+        "mode",
+        "timeoutSeconds"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "continuous",
+            "scheduled",
+            "eventDriven"
+          ]
+        },
+        "schedule": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "$ref": "#/definitions/scheduleType"
+            },
+            "cronExpression": {
+              "type": "string",
+              "pattern": "^(@(annually|yearly|monthly|weekly|daily|hourly)|((\\*|[0-9,\\-*/]+)\\s+){4}(\\*|[0-9,\\-*/]+))$"
+            },
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timezone": {
+              "type": "string",
+              "default": "UTC"
+            }
+          },
+          "additionalProperties": false
+        },
+        "eventTrigger": {
+          "type": "object",
+          "properties": {
+            "batchConfig": {
+              "type": "object",
+              "properties": {
+                "minBatchSize": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxBatchSize": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "maxWaitSeconds": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "concurrency": {
+          "type": "object",
+          "properties": {
+            "maxConcurrentJobs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxQueueSize": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "queueStrategy": {
+              "enum": [
+                "fifo",
+                "priority"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        }
+      },
+      "additionalProperties": false
+    },
+    "stateManagement": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "type": {
+          "enum": [
+            "checkpoint",
+            "cursor",
+            "watermark"
+          ]
+        },
+        "storage": {
+          "type": "object",
+          "properties": {
+            "backend": {
+              "enum": [
+                "postgres",
+                "redis",
+                "dynamodb",
+                "sqlite"
+              ]
+            },
+            "location": {
+              "type": "string"
+            },
+            "encryption": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "checkpoint": {
+          "type": "object",
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "onBatchComplete": {
+              "type": "boolean",
+              "default": true
+            },
+            "strategy": {
+              "enum": [
+                "incremental",
+                "full"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "resumeOnRestart": {
+          "type": "boolean",
+          "default": true
+        },
+        "deduplication": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "keyFields": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "windowSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "storage": {
+              "enum": [
+                "redis",
+                "postgres"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "metricCondition": {
+      "type": "object",
+      "properties": {
+        "metric": {
+          "$ref": "common-schema.json#/definitions/dnsName",
+          "description": "Name of the AIMetric this condition reads."
+        },
+        "operator": {
+          "enum": [
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "eq",
+            "neq"
+          ]
+        },
+        "threshold": {
+          "type": "number"
+        },
+        "statistic": {
+          "enum": [
+            "Average",
+            "Sum",
+            "Minimum",
+            "Maximum",
+            "p50",
+            "p90",
+            "p95",
+            "p99"
+          ]
+        },
+        "periodSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "evaluationPeriods": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "datapointsToTrigger": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "lifecycle": {
+      "type": "object",
+      "properties": {
+        "pauseConditions": {
+          "type": "object",
+          "properties": {
+            "all": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/metricCondition"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "resumeConditions": {
+          "type": "object",
+          "properties": {
+            "all": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/metricCondition"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "stopOnError": {
+          "type": "boolean",
+          "default": false
+        },
+        "restartPolicy": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "maxRestarts": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "restartDelaySeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "backoffMultiplier": {
+              "type": "number",
+              "minimum": 1
+            },
+            "resetAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "health": {
+      "type": "object",
+      "properties": {
+        "checkIntervalSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "metrics": {
+          "type": "array",
+          "description": "Names of the AIMetrics watched for health.",
+          "items": {
+            "$ref": "common-schema.json#/definitions/dnsName"
+          }
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/metricCondition"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "observability": {
+      "type": "object",
+      "properties": {
+        "logs": {
+          "type": "object"
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "trackMetrics": {
+              "type": "boolean",
+              "default": true
+            },
+            "names": {
+              "type": "array",
+              "description": "Names of the AIMetrics emitted by this loop.",
+              "items": {
+                "$ref": "common-schema.json#/definitions/dnsName"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "traces": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "sampleRate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "otelExporter": {
+          "type": "object",
+          "properties": {
+            "endpoint": {
+              "type": "string"
+            },
+            "protocol": {
+              "enum": [
+                "grpc",
+                "http",
+                "protobuf"
+              ]
+            },
+            "headers": {
+              "type": "object"
+            },
+            "resourceAttributes": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "requiredScopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowedRoles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowedActions": {
+          "type": "object"
+        },
+        "requiresApproval": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "TrainLoop",
+      "metadata": {
+        "name": "sft-nightly"
+      },
+      "spec": {
+        "type": "training",
+        "version": "1.0.0",
+        "status": "active",
+        "worker": {
+          "image": "acme/trainer:1.0.0",
+          "env": {
+            "EPOCHS": "3"
+          }
+        },
+        "execution": {
+          "mode": "scheduled",
+          "timeoutSeconds": 7200,
+          "schedule": {
+            "type": "cron",
+            "cronExpression": "0 2 * * *"
+          }
+        }
+      }
+    }
+  ]
+}

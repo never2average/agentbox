@@ -13,6 +13,40 @@ from k8s_modules.connection import load_kubeconfig
 from k8s_modules import resource_store
 
 
+_SCHEMA_STORE: Dict[str, Dict[str, Any]] = {}
+
+
+def _load_schema_store(schema_dir: Path) -> Dict[str, Dict[str, Any]]:
+    """
+    Load every CRD schema once, keyed by both its $id and its file URI.
+
+    Schemas declare an absolute $id (https://agentbox.io/schemas/...), which
+    makes relative cross-file $refs resolve to that host. Pre-seeding the
+    resolver store keeps resolution local and offline.
+
+    Args:
+        schema_dir: Directory holding the CRD schemas
+
+    Returns:
+        Mapping of URI to schema document
+    """
+    if _SCHEMA_STORE:
+        return _SCHEMA_STORE
+
+    base_uri = schema_dir.as_uri() + "/"
+    for schema_file in sorted(schema_dir.glob("*-schema.json")):
+        with open(schema_file, 'r') as f:
+            schema = json.load(f)
+
+        _SCHEMA_STORE[base_uri + schema_file.name] = schema
+        if '$id' in schema:
+            _SCHEMA_STORE[schema['$id']] = schema
+            # Relative refs are resolved against the declaring schema's $id
+            _SCHEMA_STORE[schema['$id'].rsplit('/', 1)[0] + '/' + schema_file.name] = schema
+
+    return _SCHEMA_STORE
+
+
 class BaseResourceManager(ABC):
     """
     Abstract base class for managing AgentBox resources backed by Kubernetes.
@@ -48,66 +82,114 @@ class BaseResourceManager(ABC):
         """
         pass
     
+    @property
+    def schema_dir(self) -> Path:
+        """Directory holding the CRD schemas."""
+        return Path(__file__).parent.parent / "schemas"
+
     def _load_schema(self) -> Optional[Dict[str, Any]]:
         """
         Load JSON schema for this resource group.
-        
+
         Returns:
             Schema dictionary or None if not found
         """
-        schema_file = Path(__file__).parent.parent / "schemas" / f"{self.resource_group}-schema.json"
-        
+        schema_file = self.schema_dir / f"{self.resource_group}-schema.json"
+
         if not schema_file.exists():
             return None
-        
+
         with open(schema_file, 'r') as f:
             return json.load(f)
-    
+
+    @property
+    def crd(self) -> Dict[str, Any]:
+        """CRD coordinates (group/version/kind/plural) declared by the schema."""
+        if self._schema is None:
+            return {}
+        return self._schema.get('x-agentbox-crd', {})
+
+    @property
+    def kind(self) -> Optional[str]:
+        """CRD kind managed by this manager (e.g. "HarnessRuntime")."""
+        return self.crd.get('kind')
+
+    @property
+    def api_version(self) -> Optional[str]:
+        """CRD apiVersion managed by this manager (e.g. "ai.agentbox.io/v1alpha1")."""
+        group = self.crd.get('group')
+        version = self.crd.get('version')
+        return f"{group}/{version}" if group and version else None
+
+    def _normalize_spec(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Fill in the standard CRD envelope fields when they are omitted.
+
+        Args:
+            spec: Resource document
+
+        Returns:
+            Document with apiVersion and kind populated
+        """
+        if not self.kind:
+            return spec
+
+        normalized = dict(spec)
+        normalized.setdefault('apiVersion', self.api_version)
+        normalized.setdefault('kind', self.kind)
+        return normalized
+
     def _validate_spec(self, spec: Dict[str, Any]) -> None:
         """
         Validate spec against JSON schema.
-        
+
         Args:
             spec: Specification to validate
-            
+
         Raises:
-            jsonschema.ValidationError: If validation fails
+            ValueError: If validation fails
         """
         if self._schema is None:
             return
-        
+
+        # Cross-file $refs (common-schema.json#/...) resolve from the local
+        # schema store rather than being fetched over the network
+        resolver = jsonschema.RefResolver(
+            base_uri=self.schema_dir.as_uri() + "/",
+            referrer=self._schema,
+            store=_load_schema_store(self.schema_dir)
+        )
+
         try:
-            jsonschema.validate(instance=spec, schema=self._schema)
+            jsonschema.validate(
+                instance=spec,
+                schema=self._schema,
+                resolver=resolver
+            )
         except jsonschema.ValidationError as e:
             raise ValueError(f"Validation failed for {self.resource_group}: {e.message}")
-    
+
     def _extract_name(self, spec: Dict[str, Any]) -> str:
         """
-        Extract resource name from spec using standard fields.
-        
+        Extract resource name from the standard CRD envelope.
+
         Args:
-            spec: Specification dictionary
-            
+            spec: Resource document
+
         Returns:
             Extracted and sanitized name
-            
+
         Raises:
             ValueError: If name cannot be determined
         """
-        # Try common name fields in order of preference
-        name_candidates = [
-            spec.get('metadata', {}).get('runtime_id'),
-            spec.get('metadata', {}).get('id'),
-            spec.get('metadata', {}).get('name'),
-            spec.get('id'),
-            spec.get('name')
-        ]
-        
-        for name in name_candidates:
-            if name:
-                return resource_store.sanitize_name(str(name))
-        
-        raise ValueError(f"Cannot determine name from spec for {self.resource_group}")
+        name = spec.get('metadata', {}).get('name')
+
+        if name:
+            return resource_store.sanitize_name(str(name))
+
+        raise ValueError(
+            f"Cannot determine name for {self.resource_group}: metadata.name is required"
+        )
     
     def create(self, spec: Dict[str, Any], *, secret_fields: Optional[List[str]] = None) -> Dict[str, Any]:
         """
@@ -123,9 +205,10 @@ class BaseResourceManager(ABC):
         Raises:
             ValueError: If validation fails or resource already exists
         """
-        # Validate spec
+        # Normalize the CRD envelope, then validate
+        spec = self._normalize_spec(spec)
         self._validate_spec(spec)
-        
+
         # Extract name
         name = self._extract_name(spec)
         
@@ -233,8 +316,9 @@ class BaseResourceManager(ABC):
             final_spec = merged_spec
         else:
             final_spec = spec
-        
-        # Validate
+
+        # Normalize the CRD envelope, then validate
+        final_spec = self._normalize_spec(final_spec)
         self._validate_spec(final_spec)
         
         # Split public and secret data

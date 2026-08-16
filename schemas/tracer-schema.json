@@ -1,0 +1,271 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/tracer-schema.json",
+  "title": "AgentBox Tracer",
+  "description": "Observability-plane tracer: OpenTelemetry-style trace/log export batches emitted by AgentBox workloads.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "Tracer",
+    "scope": "Namespaced",
+    "shortNames": [
+      "tr"
+    ],
+    "slug": "tracer",
+    "plural": "tracers"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "Tracer"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "$ref": "#/definitions/resource",
+          "description": "Resource attributes attached to every record, e.g. service name."
+        },
+        "resourceSchemaUrl": {
+          "type": "string",
+          "description": "Schema URL for the resource attributes."
+        },
+        "scope": {
+          "$ref": "#/definitions/scope",
+          "description": "Instrumentation scope emitting these records."
+        },
+        "scopeSchemaUrl": {
+          "type": "string",
+          "description": "Schema URL for the scope."
+        },
+        "logRecords": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/logRecord"
+          },
+          "description": "Trace and log records, in OpenTelemetry shape."
+        }
+      },
+      "required": [
+        "resource",
+        "logRecords"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "typedValue": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "array",
+            "object",
+            "bytes"
+          ]
+        },
+        "stringValue": {
+          "type": "string"
+        },
+        "boolValue": {
+          "type": "boolean"
+        },
+        "intValue": {
+          "type": "integer"
+        },
+        "doubleValue": {
+          "type": "number"
+        },
+        "bytesValue": {
+          "type": "string"
+        },
+        "arrayValue": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/typedValue"
+          }
+        },
+        "kvlistValue": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/attribute"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "attribute": {
+      "type": "object",
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/definitions/typedValue"
+        }
+      },
+      "additionalProperties": false
+    },
+    "resource": {
+      "type": "object",
+      "properties": {
+        "attributes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/attribute"
+          }
+        },
+        "droppedAttributesCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/attribute"
+          }
+        },
+        "droppedAttributesCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "logRecord": {
+      "type": "object",
+      "required": [
+        "timeUnixNano",
+        "severityNumber",
+        "severityText",
+        "body"
+      ],
+      "properties": {
+        "timeUnixNano": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observedTimeUnixNano": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "severityNumber": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24
+        },
+        "severityText": {
+          "enum": [
+            "TRACE",
+            "DEBUG",
+            "INFO",
+            "WARN",
+            "ERROR",
+            "FATAL"
+          ]
+        },
+        "body": {
+          "$ref": "#/definitions/typedValue"
+        },
+        "attributes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/attribute"
+          }
+        },
+        "droppedAttributesCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "traceId": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{32}$",
+          "description": "Hex-encoded 16-byte trace ID"
+        },
+        "spanId": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{16}$",
+          "description": "Hex-encoded 8-byte span ID"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "Tracer",
+      "metadata": {
+        "name": "otel-default"
+      },
+      "spec": {
+        "resource": {
+          "attributes": [
+            {
+              "key": "service.name",
+              "value": {
+                "type": "string",
+                "stringValue": "agentbox-api"
+              }
+            }
+          ]
+        },
+        "logRecords": [
+          {
+            "timeUnixNano": 1718123456789000000,
+            "severityNumber": 9,
+            "severityText": "INFO",
+            "body": {
+              "type": "string",
+              "stringValue": "Processed 42 events"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

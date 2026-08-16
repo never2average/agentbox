@@ -1,0 +1,395 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/tool-server-schema.json",
+  "title": "AgentBox ToolServer",
+  "description": "Serving-plane tool server: runs an image that serves one or more tools over HTTP or gRPC, and publishes their contracts so callers can discover them.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "ToolServer",
+    "scope": "Namespaced",
+    "shortNames": [
+      "ts"
+    ],
+    "slug": "tool-server",
+    "plural": "toolservers"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "ToolServer"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "code",
+        "endpoint",
+        "tools"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/code",
+          "description": "The image that serves the tools."
+        },
+        "endpoint": {
+          "$ref": "#/definitions/endpoint",
+          "description": "Port and base path the server listens on. A Service is created for it."
+        },
+        "tools": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/tool"
+          },
+          "maxItems": 64,
+          "description": "Contracts for the tools this server exposes, so callers can discover them."
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1,
+          "description": "Desired replicas. Ignored while a ToolServerAutoScaler owns this server.",
+          "maximum": 10000
+        },
+        "compute": {
+          "$ref": "common-schema.json#/definitions/computeResources",
+          "description": "CPU, memory, GPU and storage requested per replica."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "description": "Environment variables passed to the image. Secret-looking values are moved into a Secret."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Set false to keep the definition but stop serving."
+        },
+        "version": {
+          "type": "string",
+          "description": "Version of the tool contracts, for callers that pin."
+        },
+        "stateManagement": {
+          "$ref": "#/definitions/stateManagement",
+          "description": "Whether tool calls carry state, and where that state lives."
+        },
+        "permissions": {
+          "$ref": "#/definitions/permissions",
+          "description": "Scopes and roles required to call these tools."
+        },
+        "monitoring": {
+          "$ref": "#/definitions/monitoring",
+          "description": "Logging and metric collection for tool calls."
+        }
+      },
+      "additionalProperties": false,
+      "x-agentbox-rules": [
+        {
+          "rule": "self.tools.all(t, self.tools.filter(o, o.name == t.name).size() == 1)",
+          "message": "tool names must be unique within a tool server"
+        }
+      ]
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "jsonSchema": {
+      "type": "object"
+    },
+    "parameters": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "object"
+        },
+        "properties": {
+          "type": "object",
+          "description": "JSON Schema properties for the tool's arguments."
+        },
+        "required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "returns": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "object",
+            "string",
+            "number",
+            "boolean",
+            "array"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "schema": {
+          "$ref": "#/definitions/jsonSchema"
+        }
+      },
+      "additionalProperties": false
+    },
+    "stateManagement": {
+      "type": "object",
+      "properties": {
+        "persistentState": {
+          "type": "boolean",
+          "default": false
+        },
+        "stateStorage": {
+          "enum": [
+            "memory",
+            "redis",
+            "database"
+          ]
+        },
+        "stateKey": {
+          "type": "string"
+        },
+        "stateTtlSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 3600
+        },
+        "sharedAcrossSessions": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "requiredScopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowedRoles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requiresApproval": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "monitoring": {
+      "type": "object",
+      "properties": {
+        "logExecution": {
+          "type": "boolean",
+          "default": true
+        },
+        "logLevel": {
+          "enum": [
+            "debug",
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        "trackMetrics": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "example": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "input": {
+          "type": "object"
+        },
+        "output": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tool": {
+      "type": "object",
+      "description": "A single tool served by this server.",
+      "required": [
+        "name",
+        "parameters",
+        "returns"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "common-schema.json#/definitions/dnsName"
+        },
+        "description": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path this tool is served on, relative to the server endpoint.",
+          "pattern": "^/"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ],
+          "default": "POST"
+        },
+        "parameters": {
+          "$ref": "#/definitions/parameters"
+        },
+        "returns": {
+          "$ref": "#/definitions/returns"
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/example"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "code": {
+      "type": "object",
+      "required": [
+        "image"
+      ],
+      "properties": {
+        "image": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9._\\-/]*[a-z0-9])?(:[\\w][\\w.\\-]{0,127})?(@sha256:[a-f0-9]{64})?$"
+        },
+        "entrypoint": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "endpoint": {
+      "type": "object",
+      "required": [
+        "port"
+      ],
+      "properties": {
+        "interface": {
+          "enum": [
+            "http",
+            "grpc"
+          ],
+          "default": "http"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "basePath": {
+          "type": "string",
+          "default": "/",
+          "pattern": "^/"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "ToolServer",
+      "metadata": {
+        "name": "summarize-text"
+      },
+      "spec": {
+        "code": {
+          "image": "acme/text-tools:2.1.0"
+        },
+        "endpoint": {
+          "interface": "http",
+          "port": 8080,
+          "basePath": "/tools"
+        },
+        "tools": [
+          {
+            "name": "summarize-text",
+            "description": "Summarize input text into a short abstract",
+            "path": "/summarize",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text"
+              ]
+            },
+            "returns": {
+              "type": "object",
+              "description": "Summarization result"
+            }
+          }
+        ],
+        "replicas": 2
+      }
+    }
+  ]
+}

@@ -1,0 +1,564 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/evaluator-schema.json",
+  "title": "AgentBox Evaluator",
+  "description": "Training-plane evaluator: evaluation suite, dataset binding and scoring for a target resource.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "Evaluator",
+    "scope": "Namespaced",
+    "shortNames": [
+      "ev"
+    ],
+    "slug": "evaluator",
+    "plural": "evaluators"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "Evaluator"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable name for this evaluation suite."
+        },
+        "description": {
+          "type": "string",
+          "description": "What this suite measures."
+        },
+        "dataset": {
+          "$ref": "#/definitions/dataset",
+          "description": "Where the evaluation cases come from."
+        },
+        "scoring": {
+          "$ref": "#/definitions/scoring",
+          "description": "Metrics applied to each case, and how they combine into a score."
+        },
+        "runConfig": {
+          "$ref": "#/definitions/runConfig",
+          "description": "Concurrency, retries and sampling for a run."
+        },
+        "tags": {
+          "$ref": "./common-schema.json#/definitions/tags",
+          "description": "Free-form labels for discovery."
+        },
+        "metadata": {
+          "$ref": "./common-schema.json#/definitions/metadata",
+          "description": "Free-form annotations."
+        }
+      },
+      "required": [
+        "name",
+        "dataset",
+        "scoring"
+      ],
+      "additionalProperties": false,
+      "x-agentbox-rules": [
+        {
+          "rule": "[has(self.dataset.inline), has(self.dataset.file), has(self.dataset.ioConnector)].filter(x, x).size() == 1",
+          "message": "exactly one dataset source must be set"
+        }
+      ]
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "case": {
+      "type": "object",
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "input": {
+          "type": "object"
+        },
+        "expected": {},
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "datasetInline": {
+      "type": "object",
+      "required": [
+        "cases"
+      ],
+      "properties": {
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/case"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "datasetFile": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "jsonl",
+            "json",
+            "csv"
+          ],
+          "default": "jsonl"
+        },
+        "fieldMapping": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "string"
+            },
+            "expected": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "encoding": {
+          "type": "string",
+          "default": "utf-8"
+        }
+      },
+      "additionalProperties": false
+    },
+    "datasetIoConnector": {
+      "type": "object",
+      "required": [
+        "dataset"
+      ],
+      "properties": {
+        "dataset": {
+          "$ref": "common-schema.json#/definitions/dnsName",
+          "description": "Name of the dataset supplying evaluation cases."
+        },
+        "filters": {
+          "type": "object"
+        },
+        "batchSize": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 100
+        }
+      },
+      "additionalProperties": false
+    },
+    "dataset": {
+      "type": "object",
+      "description": "Evaluation cases. Set exactly one source.",
+      "properties": {
+        "inline": {
+          "$ref": "#/definitions/datasetInline"
+        },
+        "file": {
+          "$ref": "#/definitions/datasetFile"
+        },
+        "ioConnector": {
+          "$ref": "#/definitions/datasetIoConnector"
+        }
+      },
+      "additionalProperties": false
+    },
+    "metricExactMatch": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "exactMatch"
+        },
+        "caseSensitive": {
+          "type": "boolean",
+          "default": false
+        },
+        "normalizeWhitespace": {
+          "type": "boolean",
+          "default": true
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "metricContains": {
+      "type": "object",
+      "required": [
+        "type",
+        "needle"
+      ],
+      "properties": {
+        "type": {
+          "const": "contains"
+        },
+        "needle": {
+          "type": "string"
+        },
+        "caseSensitive": {
+          "type": "boolean",
+          "default": false
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "metricRegex": {
+      "type": "object",
+      "required": [
+        "type",
+        "pattern"
+      ],
+      "properties": {
+        "type": {
+          "const": "regex"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "flags": {
+          "type": "string",
+          "default": ""
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "metricNumeric": {
+      "type": "object",
+      "required": [
+        "type",
+        "op",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "numeric"
+        },
+        "path": {
+          "type": "string"
+        },
+        "op": {
+          "$ref": "./common-schema.json#/definitions/comparisonOperator"
+        },
+        "value": {
+          "type": [
+            "number",
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "metricSemanticSimilarity": {
+      "type": "object",
+      "required": [
+        "type",
+        "model",
+        "gateway",
+        "threshold"
+      ],
+      "properties": {
+        "type": {
+          "const": "semanticSimilarity"
+        },
+        "model": {
+          "$ref": "common-schema.json#/definitions/dnsName",
+          "description": "Name of the model used to score."
+        },
+        "gateway": {
+          "$ref": "common-schema.json#/definitions/dnsName",
+          "description": "Name of the gateway the scoring model is called through."
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.8
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "metricLlmJudge": {
+      "type": "object",
+      "required": [
+        "type",
+        "model",
+        "gateway",
+        "promptTemplate"
+      ],
+      "properties": {
+        "type": {
+          "const": "llmJudge"
+        },
+        "model": {
+          "$ref": "common-schema.json#/definitions/dnsName",
+          "description": "Name of the model used to score."
+        },
+        "gateway": {
+          "$ref": "common-schema.json#/definitions/dnsName",
+          "description": "Name of the gateway the scoring model is called through."
+        },
+        "executionMode": {
+          "enum": [
+            "inline",
+            "background"
+          ],
+          "default": "inline"
+        },
+        "promptTemplate": {
+          "type": "string"
+        },
+        "inputBinding": {
+          "type": "object",
+          "properties": {
+            "expected": {
+              "type": "string"
+            },
+            "actual": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputParser": {
+          "type": "object",
+          "properties": {
+            "regex": {
+              "type": "string"
+            },
+            "cast": {
+              "enum": [
+                "float",
+                "int",
+                "string"
+              ]
+            },
+            "labelMap": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "scoreRange": {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "number",
+              "default": 0
+            },
+            "max": {
+              "type": "number",
+              "default": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "threshold": {
+          "type": "number"
+        },
+        "cacheTtlSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "scoringMetric": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/metricExactMatch"
+        },
+        {
+          "$ref": "#/definitions/metricContains"
+        },
+        {
+          "$ref": "#/definitions/metricRegex"
+        },
+        {
+          "$ref": "#/definitions/metricNumeric"
+        },
+        {
+          "$ref": "#/definitions/metricSemanticSimilarity"
+        },
+        {
+          "$ref": "#/definitions/metricLlmJudge"
+        }
+      ]
+    },
+    "scoring": {
+      "type": "object",
+      "required": [
+        "metrics"
+      ],
+      "properties": {
+        "metrics": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "metric"
+            ],
+            "properties": {
+              "metric": {
+                "$ref": "#/definitions/scoringMetric"
+              },
+              "weight": {
+                "type": "number",
+                "minimum": 0,
+                "default": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "aggregation": {
+          "enum": [
+            "weightedAverage",
+            "min",
+            "max",
+            "allPass"
+          ],
+          "default": "weightedAverage"
+        },
+        "passThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.8
+        }
+      },
+      "additionalProperties": false
+    },
+    "runConfig": {
+      "type": "object",
+      "properties": {
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 42
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60
+        },
+        "stopOnFail": {
+          "type": "boolean",
+          "default": false
+        },
+        "randomizeOrder": {
+          "type": "boolean",
+          "default": false
+        },
+        "retriesOnError": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "storeOutputs": {
+          "type": "boolean",
+          "default": true
+        },
+        "logLevel": {
+          "enum": [
+            "debug",
+            "info",
+            "warning",
+            "error"
+          ],
+          "default": "info"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "Evaluator",
+      "metadata": {
+        "name": "summarization-accuracy"
+      },
+      "spec": {
+        "name": "Summarization Accuracy",
+        "dataset": {
+          "inline": {
+            "cases": [
+              {
+                "id": "case1",
+                "input": {
+                  "text": "The quick brown fox."
+                },
+                "expected": "quick brown fox"
+              }
+            ]
+          }
+        },
+        "scoring": {
+          "metrics": [
+            {
+              "metric": {
+                "type": "contains",
+                "needle": "quick brown fox"
+              },
+              "weight": 1
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

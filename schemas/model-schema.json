@@ -1,0 +1,288 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/model-schema.json",
+  "title": "AgentBox Model",
+  "description": "Serving-plane model: registry entry, weights source, architecture and runtime capabilities.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "Model",
+    "scope": "Namespaced",
+    "shortNames": [
+      "mdl"
+    ],
+    "slug": "model",
+    "plural": "models"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "Model"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "modelName": {
+          "type": "string",
+          "description": "Human-readable model name, as callers refer to it."
+        },
+        "modelHub": {
+          "$ref": "#/definitions/modelHub",
+          "description": "Where the weights live."
+        },
+        "hubModelId": {
+          "type": "string",
+          "description": "Model identifier within the hub, e.g. meta-llama/Meta-Llama-3-70B-Instruct."
+        },
+        "downloadApi": {
+          "$ref": "#/definitions/downloadApi",
+          "description": "How the platform fetches the weights, including auth."
+        },
+        "modelArchitecture": {
+          "$ref": "#/definitions/architecture",
+          "description": "Architecture family and layer/head geometry."
+        },
+        "modelSize": {
+          "$ref": "#/definitions/modelSize",
+          "description": "Parameter count and on-disk footprint, used for placement."
+        },
+        "contextWindow": {
+          "$ref": "#/definitions/contextWindow",
+          "description": "Maximum context and output length the model supports."
+        },
+        "supportsStreaming": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the model can stream tokens."
+        },
+        "supportsFunctionCalling": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the model supports tool/function calling."
+        },
+        "modalities": {
+          "$ref": "#/definitions/modalities",
+          "description": "Input and output modalities the model accepts."
+        },
+        "tags": {
+          "$ref": "./common-schema.json#/definitions/tags",
+          "description": "Free-form labels for discovery."
+        }
+      },
+      "required": [
+        "modelName",
+        "modelHub",
+        "hubModelId"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "modelHub": {
+      "enum": [
+        "huggingface",
+        "s3",
+        "gcs",
+        "azureBlob",
+        "custom"
+      ]
+    },
+    "downloadApi": {
+      "type": "object",
+      "required": [
+        "hubUrl",
+        "apiEndpoint",
+        "downloadMethod"
+      ],
+      "properties": {
+        "hubUrl": {
+          "$ref": "./common-schema.json#/definitions/uri"
+        },
+        "apiEndpoint": {
+          "$ref": "./common-schema.json#/definitions/uri"
+        },
+        "downloadMethod": {
+          "enum": [
+            "huggingfaceHub",
+            "http",
+            "s3",
+            "gcs",
+            "custom"
+          ]
+        },
+        "requiresAuth": {
+          "type": "boolean",
+          "default": false
+        },
+        "authTokenEnv": {
+          "type": "string"
+        },
+        "filesToDownload": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "architecture": {
+      "type": "object",
+      "required": [
+        "architectureType",
+        "baseArchitecture"
+      ],
+      "properties": {
+        "architectureType": {
+          "enum": [
+            "transformerDecoder",
+            "transformerEncoder",
+            "moe",
+            "rnn",
+            "custom"
+          ]
+        },
+        "baseArchitecture": {
+          "type": "string"
+        },
+        "numLayers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "numHeads": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "numKeyValueHeads": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hiddenSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "intermediateSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "vocabSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ropeTheta": {
+          "type": "number",
+          "minimum": 0
+        },
+        "attentionType": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "modelSize": {
+      "type": "object",
+      "properties": {
+        "totalParams": {
+          "type": "string"
+        },
+        "totalParamsExact": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "diskSizeGb": {
+          "type": "number",
+          "minimum": 0
+        },
+        "quantizationMethod": {
+          "type": "string"
+        },
+        "quantizationPrecision": {
+          "type": "string"
+        },
+        "quantizationMemoryGb": {
+          "type": "number",
+          "minimum": 0
+        },
+        "quantizationQualityScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "contextWindow": {
+      "type": "object",
+      "properties": {
+        "maxContextLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "trainingContextLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "supportsExtendedContext": {
+          "type": "boolean",
+          "default": false
+        },
+        "ropeScaling": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "modalities": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "output": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "Model",
+      "metadata": {
+        "name": "llama-3-70b-instruct"
+      },
+      "spec": {
+        "modelName": "Llama 3 70B Instruct",
+        "modelHub": "huggingface",
+        "hubModelId": "meta-llama/Meta-Llama-3-70B-Instruct"
+      }
+    }
+  ]
+}

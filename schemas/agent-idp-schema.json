@@ -1,0 +1,256 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/agent-idp-schema.json",
+  "title": "AgentBox AgentIdP",
+  "description": "Serving-plane agent identity provider: workload identities, policy groups and default behavior.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "AgentIdP",
+    "scope": "Namespaced",
+    "shortNames": [
+      "idp"
+    ],
+    "slug": "agent-idp",
+    "plural": "agentidps"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "AgentIdP"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable name for this identity provider."
+        },
+        "description": {
+          "type": "string",
+          "description": "What this identity provider covers."
+        },
+        "status": {
+          "$ref": "#/definitions/status",
+          "description": "Whether this identity provider is in force."
+        },
+        "identity": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/identity"
+          },
+          "description": "Identity matchers: which roles, service accounts or tags this applies to."
+        },
+        "policyGroups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/policyGroup"
+          },
+          "description": "Ordered groups of guardrails, with conflict resolution between them."
+        },
+        "defaultBehavior": {
+          "enum": [
+            "deny",
+            "allow",
+            "monitor"
+          ],
+          "description": "What happens when no policy matches: allow or deny."
+        },
+        "inheritFrom": {
+          "type": "string",
+          "description": "Name of another AgentIdP whose policy groups are inherited."
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "status": {
+      "enum": [
+        "active",
+        "inactive"
+      ]
+    },
+    "identityType": {
+      "enum": [
+        "user",
+        "role",
+        "service",
+        "tenant",
+        "agent"
+      ]
+    },
+    "matchRule": {
+      "type": "object",
+      "required": [
+        "attribute",
+        "op"
+      ],
+      "properties": {
+        "attribute": {
+          "type": "string"
+        },
+        "op": {
+          "$ref": "./common-schema.json#/definitions/comparisonOperator"
+        },
+        "value": {}
+      },
+      "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/identityType"
+        },
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "match": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/matchRule"
+          }
+        },
+        "tags": {
+          "$ref": "./common-schema.json#/definitions/tags"
+        }
+      },
+      "additionalProperties": false
+    },
+    "appliesTo": {
+      "type": "object",
+      "properties": {
+        "targetType": {
+          "enum": [
+            "agent",
+            "tool",
+            "gateway",
+            "channel",
+            "hardware",
+            "runtime",
+            "model"
+          ]
+        },
+        "targets": {
+          "type": "array",
+          "description": "Names this policy group applies to.",
+          "items": {
+            "$ref": "common-schema.json#/definitions/dnsName"
+          }
+        },
+        "selector": {
+          "type": "object",
+          "properties": {
+            "tags": {
+              "$ref": "./common-schema.json#/definitions/tags"
+            },
+            "attributesMatch": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/matchRule"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "policyGroup": {
+      "type": "object",
+      "required": [
+        "mode",
+        "priority",
+        "guardrails"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "enforce",
+            "monitor"
+          ]
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10
+        },
+        "conflictResolution": {
+          "enum": [
+            "denyOverrides",
+            "permitOverrides",
+            "firstMatch"
+          ]
+        },
+        "guardrails": {
+          "type": "array",
+          "description": "Names of the guardrails in this group.",
+          "items": {
+            "$ref": "common-schema.json#/definitions/dnsName"
+          }
+        },
+        "appliesTo": {
+          "$ref": "#/definitions/appliesTo"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "AgentIdP",
+      "metadata": {
+        "name": "default-idp"
+      },
+      "spec": {
+        "status": "active",
+        "identity": [
+          {
+            "type": "role",
+            "roles": [
+              "admin"
+            ]
+          }
+        ],
+        "defaultBehavior": "deny"
+      }
+    }
+  ]
+}

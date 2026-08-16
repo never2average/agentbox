@@ -1,0 +1,725 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/ai-metric-schema.json",
+  "title": "AgentBox AIMetric",
+  "description": "Observability-plane metric definition: base, metric_math and AI-derived metrics.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "AIMetric",
+    "scope": "Namespaced",
+    "shortNames": [
+      "aim"
+    ],
+    "slug": "ai-metric",
+    "plural": "aimetrics"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "AIMetric"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/metricType",
+          "description": "How the value is produced: from traces, from other metrics, or by a model."
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Metric namespace, used to group related metrics."
+        },
+        "metricName": {
+          "type": "string",
+          "description": "Metric name as exported."
+        },
+        "description": {
+          "type": "string",
+          "description": "What this metric measures."
+        },
+        "category": {
+          "$ref": "#/definitions/category",
+          "description": "Broad classification, e.g. performance, cost or quality."
+        },
+        "status": {
+          "$ref": "#/definitions/status",
+          "description": "Whether this metric is being collected."
+        },
+        "calculated": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the value is derived rather than observed directly."
+        },
+        "sourceType": {
+          "$ref": "#/definitions/sourceType",
+          "description": "Origin of the underlying signal."
+        },
+        "fromLogs": {
+          "$ref": "#/definitions/fromLogs",
+          "description": "How to extract the value from trace and log records."
+        },
+        "metricMath": {
+          "$ref": "#/definitions/metricMathBlock",
+          "description": "Expression combining other metrics into this one."
+        },
+        "dimensions": {
+          "$ref": "#/definitions/dimensions",
+          "description": "Dimensions the metric is broken down by."
+        },
+        "unit": {
+          "$ref": "#/definitions/unit",
+          "description": "Unit of the emitted value."
+        },
+        "statistic": {
+          "$ref": "#/definitions/statistic",
+          "description": "Default statistic applied over the period."
+        },
+        "periodSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60,
+          "description": "Aggregation period."
+        },
+        "storageResolutionSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Resolution the metric is stored at."
+        },
+        "windowing": {
+          "$ref": "#/definitions/windowing",
+          "description": "Window shape used when aggregating."
+        },
+        "aggregation": {
+          "$ref": "#/definitions/aggregation",
+          "description": "How values are rolled up across dimensions."
+        },
+        "retention": {
+          "$ref": "#/definitions/retention",
+          "description": "How long values are kept."
+        },
+        "export": {
+          "$ref": "#/definitions/export",
+          "description": "Where the metric is exported to."
+        },
+        "permissions": {
+          "$ref": "#/definitions/permissions",
+          "description": "Who may read this metric."
+        },
+        "tags": {
+          "$ref": "./common-schema.json#/definitions/tags",
+          "description": "Free-form labels for discovery."
+        },
+        "enforcement": {
+          "type": "object",
+          "properties": {
+            "requireLogSource": {
+              "type": "boolean"
+            },
+            "dropIfNoValidLogs": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Whether guardrails may act on this metric."
+        }
+      },
+      "required": [
+        "type",
+        "metricName"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "base"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "fromLogs",
+              "unit",
+              "statistic",
+              "periodSeconds"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "metricMath"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "metricMath",
+              "unit",
+              "statistic",
+              "periodSeconds"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "ai"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "fromLogs",
+              "unit",
+              "statistic",
+              "periodSeconds"
+            ],
+            "properties": {
+              "fromLogs": {
+                "required": [
+                  "valueSelector"
+                ],
+                "properties": {
+                  "valueSelector": {
+                    "required": [
+                      "type",
+                      "ai"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "metricType": {
+      "enum": [
+        "base",
+        "metricMath",
+        "ai"
+      ]
+    },
+    "category": {
+      "enum": [
+        "product",
+        "engineering"
+      ]
+    },
+    "status": {
+      "enum": [
+        "active",
+        "inactive",
+        "test"
+      ]
+    },
+    "sourceType": {
+      "enum": [
+        "logsOnly"
+      ]
+    },
+    "unit": {
+      "enum": [
+        "Count",
+        "Seconds",
+        "Milliseconds",
+        "Bytes",
+        "Percent",
+        "None"
+      ]
+    },
+    "statistic": {
+      "enum": [
+        "Sum",
+        "Average",
+        "Minimum",
+        "Maximum",
+        "SampleCount",
+        "p50",
+        "p90",
+        "p95",
+        "p99"
+      ]
+    },
+    "logCondition": {
+      "type": "object",
+      "required": [
+        "path",
+        "op"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "op": {
+          "$ref": "./common-schema.json#/definitions/comparisonOperator"
+        },
+        "value": {}
+      },
+      "additionalProperties": false
+    },
+    "logQuery": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/logCondition"
+          }
+        },
+        "severityMin": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24,
+          "default": 1
+        },
+        "severityMax": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24,
+          "default": 24
+        },
+        "timeRangeSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60
+        }
+      },
+      "additionalProperties": false
+    },
+    "resourceSelector": {
+      "type": "object",
+      "properties": {
+        "attributesMatch": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "key",
+              "op"
+            ],
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "op": {
+                "$ref": "./common-schema.json#/definitions/comparisonOperator"
+              },
+              "value": {}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "requiredFields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "schemaUrl": {
+          "type": "string"
+        },
+        "droppedAttributesCountMax": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeSkewToleranceMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "valueSelector": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "count",
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "percentile",
+            "extract",
+            "ai"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "cast": {
+          "enum": [
+            "int",
+            "float"
+          ]
+        },
+        "default": {
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "percentile": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 95
+        },
+        "transform": {
+          "type": "object",
+          "properties": {
+            "regex": {
+              "type": "string"
+            },
+            "jsonpath": {
+              "type": "string"
+            },
+            "map": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "additionalProperties": false
+        },
+        "ai": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "$ref": "common-schema.json#/definitions/dnsName",
+              "description": "Name of the model used to derive the value."
+            },
+            "gateway": {
+              "$ref": "common-schema.json#/definitions/dnsName",
+              "description": "Name of the gateway the model is called through."
+            },
+            "executionMode": {
+              "enum": [
+                "inline",
+                "background"
+              ]
+            },
+            "promptTemplate": {
+              "type": "string"
+            },
+            "inputBinding": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "outputParser": {
+              "type": "object",
+              "properties": {
+                "regex": {
+                  "type": "string"
+                },
+                "cast": {
+                  "enum": [
+                    "float",
+                    "int",
+                    "string"
+                  ]
+                },
+                "labelMap": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "confidenceThreshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0
+            },
+            "cacheTtlSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "fromLogs": {
+      "type": "object",
+      "properties": {
+        "resourceSelector": {
+          "$ref": "#/definitions/resourceSelector"
+        },
+        "logQuery": {
+          "$ref": "#/definitions/logQuery"
+        },
+        "validation": {
+          "$ref": "#/definitions/validation"
+        },
+        "valueSelector": {
+          "$ref": "#/definitions/valueSelector"
+        }
+      },
+      "additionalProperties": false
+    },
+    "dimensions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "optional": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "windowing": {
+      "type": "object",
+      "properties": {
+        "lookbackSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 300
+        },
+        "sliding": {
+          "type": "boolean",
+          "default": true
+        },
+        "missingDataPolicy": {
+          "enum": [
+            "ignore",
+            "treatAsZero",
+            "break"
+          ],
+          "default": "ignore"
+        },
+        "lateArrivalSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 120
+        }
+      },
+      "additionalProperties": false
+    },
+    "aggregation": {
+      "type": "object",
+      "properties": {
+        "rollupsSeconds": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "percentiles": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "retention": {
+      "type": "object",
+      "properties": {
+        "rawMinutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rollupsDays": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "export": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "prometheusName": {
+          "type": "string"
+        },
+        "cloudwatch": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "namespace": {
+              "type": "string"
+            },
+            "storageResolutionSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 60
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "allowedWriters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requiresApproval": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "metricMathBlock": {
+      "type": "object",
+      "required": [
+        "expression"
+      ],
+      "properties": {
+        "expression": {
+          "type": "string"
+        },
+        "inputMetrics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "variables": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "nanHandling": {
+          "enum": [
+            "treatAsZero",
+            "propagate",
+            "skip"
+          ]
+        },
+        "outputUnit": {
+          "enum": [
+            "Percent",
+            "Count",
+            "Seconds"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "AIMetric",
+      "metadata": {
+        "name": "request-latency"
+      },
+      "spec": {
+        "type": "base",
+        "metricName": "request_latency_ms",
+        "unit": "Milliseconds",
+        "statistic": "Average",
+        "periodSeconds": 60,
+        "fromLogs": {
+          "logQuery": {
+            "conditions": [
+              {
+                "path": "attributes.event",
+                "op": "eq",
+                "value": "request_complete"
+              }
+            ],
+            "timeRangeSeconds": 60
+          },
+          "valueSelector": {
+            "type": "avg",
+            "path": "attributes.duration_ms",
+            "cast": "float"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,163 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/model-autoscaler-schema.json",
+  "title": "AgentBox ModelAutoScaler",
+  "description": "Serving-plane autoscaler for a Model: scales model replicas on AIMetric-driven signals such as queue depth, token throughput or GPU utilization.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "ModelAutoScaler",
+    "scope": "Namespaced",
+    "shortNames": [
+      "mas"
+    ],
+    "slug": "model-autoscaler",
+    "plural": "modelautoscalers"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "ModelAutoScaler"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "scaleTargetRef",
+        "bounds",
+        "metrics"
+      ],
+      "properties": {
+        "scaleTargetRef": {
+          "allOf": [
+            {
+              "$ref": "common-schema.json#/definitions/scaleTargetRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "Model"
+                }
+              }
+            }
+          ],
+          "description": "Model this autoscaler owns."
+        },
+        "bounds": {
+          "$ref": "common-schema.json#/definitions/replicaBounds",
+          "description": "Replica floor and ceiling."
+        },
+        "metrics": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "common-schema.json#/definitions/scalingMetric"
+          },
+          "maxItems": 8,
+          "description": "Signals the scaling decision reads. Multiple metrics scale to the highest demand."
+        },
+        "behavior": {
+          "$ref": "common-schema.json#/definitions/scalingBehavior",
+          "description": "Stabilisation windows and rate limits on scale up and scale down."
+        },
+        "placement": {
+          "type": "object",
+          "description": "Where new replicas may land. Node supply itself is delegated to the existing cluster autoscaler CRDs.",
+          "properties": {
+            "nodeSelector": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "accelerator": {
+              "type": "string"
+            },
+            "spotTolerant": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Set false to pause scaling without deleting the autoscaler."
+        }
+      },
+      "additionalProperties": false,
+      "x-agentbox-rules": [
+        {
+          "rule": "self.bounds.maxReplicas >= self.bounds.minReplicas",
+          "message": "bounds.maxReplicas must be >= bounds.minReplicas"
+        },
+        {
+          "rule": "self.scaleTargetRef.kind == 'Model'",
+          "message": "scaleTargetRef must reference a Model"
+        }
+      ]
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "ModelAutoScaler",
+      "metadata": {
+        "name": "llama-3-70b-autoscaler"
+      },
+      "spec": {
+        "scaleTargetRef": {
+          "kind": "Model",
+          "name": "llama-3-70b-instruct"
+        },
+        "bounds": {
+          "minReplicas": 1,
+          "maxReplicas": 8
+        },
+        "metrics": [
+          {
+            "type": "aiMetric",
+            "metric": "inference-queue-depth",
+            "target": {
+              "metricType": "averageValue",
+              "value": 20
+            }
+          },
+          {
+            "type": "resource",
+            "resource": "gpu",
+            "target": {
+              "metricType": "utilization",
+              "value": 75
+            }
+          }
+        ],
+        "behavior": {
+          "scaleDown": {
+            "stabilizationWindowSeconds": 600
+          },
+          "scaleToZero": {
+            "enabled": false
+          }
+        }
+      }
+    }
+  ]
+}

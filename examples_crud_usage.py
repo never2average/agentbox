@@ -2,449 +2,480 @@
 """
 Example usage of AgentBox CRUD Resource Managers
 
-This script demonstrates how to use the resource managers to create, read,
-update, and delete various AgentBox resources backed by Kubernetes.
+Every AgentBox resource is a CRD with the same envelope:
+
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "<Kind>",
+      "metadata": {"name": "..."},
+      "spec": {...},
+      "status": {...}          # synthesized by the manager, never sent
+    }
+
+apiVersion and kind are filled in automatically when omitted; metadata.name is
+the resource name and is required.
 """
 import json
 from pathlib import Path
 from k8s_modules.registry import (
     get_manager,
+    get_kind,
     ResourceRegistry,
     create_resource,
     get_resource,
     update_resource,
     delete_resource,
     list_resources,
-    list_resource_groups
+    list_resource_groups,
+    CRD_KINDS
 )
 
 
 def example_config_only_resource():
-    """Example: Create and manage a config-only resource (agents)."""
-    print("\n=== Config-Only Resource Example (Agents) ===")
-    
+    """Example: Create and manage a config-only CRD (Model)."""
+    print("\n=== Config-Only CRD Example (Model) ===")
+
     # Path to your kubeconfig
     kubeconfig_path = str(Path.home() / ".kube" / "config")
-    
-    # Get manager for agents
-    agents_mgr = get_manager("agents", kubeconfig_path)
-    
-    # Create an agent
-    agent_spec = {
-        "name": "orchestrator",
-        "usage_limits": {
-            "metric_id": {"$min": 100, "$max": 500}
-        },
-        "start_node": "state_id_1",
-        "governance_controls": "gov_id_1",
-        "graph": {
-            "state_id_1": {
-                "model_id": "model_id_1",
-                "gateway_id": "gateway_id_1",
-                "tool_ids": ["tool_id_1", "tool_id_2"],
-                "prompts": {
-                    "template": {
-                        "system": "You are helpful.",
-                        "user": "Do X"
-                    }
-                }
+
+    # Get manager for the Model CRD
+    model_mgr = get_manager("model", kubeconfig_path)
+
+    model = {
+        "apiVersion": "ai.agentbox.io/v1beta1",
+        "kind": "Model",
+        "metadata": {"name": "llama-3-70b-instruct"},
+        "spec": {
+            "modelName": "Llama 3 70B Instruct",
+            "modelHub": "huggingface",
+            "hubModelId": "meta-llama/Meta-Llama-3-70B-Instruct",
+            "downloadApi": {
+                "hubUrl": "https://huggingface.co/meta-llama/Meta-Llama-3-70B-Instruct",
+                "apiEndpoint": "https://huggingface.co/api/models/meta-llama/Meta-Llama-3-70B-Instruct",
+                "downloadMethod": "huggingfaceHub",
+                "requiresAuth": True,
+                "authTokenEnv": "HF_TOKEN"
             }
         }
     }
-    
-    print("Creating agent...")
-    created = agents_mgr.create(agent_spec)
+
+    print("Creating model...")
+    created = model_mgr.create(model)
     print(f"Created: {json.dumps(created, indent=2)}")
-    
-    # Get the agent
-    print("\nGetting agent...")
-    agent = agents_mgr.get("orchestrator")
-    print(f"Retrieved: {agent['name']} - State: {agent['status']['state']}")
-    
-    # Update the agent
-    print("\nUpdating agent...")
-    update_spec = {
-        "name": "orchestrator",
-        "usage_limits": {
-            "metric_id": {"$min": 200, "$max": 600}
-        }
-    }
-    updated = agents_mgr.update("orchestrator", update_spec, strategy="merge")
-    print(f"Updated limits: {updated['usage_limits']}")
-    
-    # List all agents
-    print("\nListing all agents...")
-    all_agents = agents_mgr.list()
-    print(f"Found {len(all_agents)} agent(s)")
-    
-    # Delete the agent
-    print("\nDeleting agent...")
-    agents_mgr.delete("orchestrator")
+
+    # Get the model
+    print("\nGetting model...")
+    fetched = model_mgr.get("llama-3-70b-instruct")
+    print(f"Retrieved: {fetched['metadata']['name']} - State: {fetched['status']['state']}")
+
+    # Update the model (merge strategy patches spec in place)
+    print("\nUpdating model...")
+    updated = model_mgr.update(
+        "llama-3-70b-instruct",
+        {"spec": {"contextWindow": {"maxTokens": 8192}}},
+        strategy="merge"
+    )
+    print(f"Updated context window: {updated['spec']['contextWindow']}")
+
+    # List all models
+    print("\nListing all models...")
+    all_models = model_mgr.list()
+    print(f"Found {len(all_models)} model(s)")
+
+    # Delete the model
+    print("\nDeleting model...")
+    model_mgr.delete("llama-3-70b-instruct")
     print("Deleted successfully")
 
 
-def example_runtime_server():
-    """Example: Create a runtime with Deployment and Service."""
-    print("\n=== Runtime Server Example (Deployment + Service) ===")
-    
+def example_harness_runtime_server():
+    """Example: Create a HarnessRuntime backed by a Deployment and Service."""
+    print("\n=== HarnessRuntime Server Example (Deployment + Service) ===")
+
     kubeconfig_path = str(Path.home() / ".kube" / "config")
-    runtimes_mgr = get_manager("runtimes", kubeconfig_path)
-    
-    runtime_spec = {
+    harness_mgr = get_manager("harness-runtime", kubeconfig_path)
+
+    harness = {
+        "apiVersion": "ai.agentbox.io/v1beta1",
+        "kind": "HarnessRuntime",
         "metadata": {
-            "runtime_id": "rt_api_1",
-            "name": "api-runtime",
-            "version": "1.0.0",
-            "kind": "server"
+            "name": "api-harness",
+            "labels": {"app.kubernetes.io/version": "1.4.0"},
         },
         "spec": {
+            "runtimeKind": "server",
             "compute": {
-                "cpu": {
-                    "cores": 2,
-                    "memory_mb": 2048
-                }
+                "cpu": {"cores": 2, "memoryMb": 2048}
             },
             "code": {
-                "image": "nginx:latest",
-                "entrypoint": "/usr/sbin/nginx",
-                "args": ["-g", "daemon off;"]
+                "image": "acme/support-agent:1.4.0",
+                "entrypoint": "/app/serve"
             },
+            "replicas": 2,
             "endpoints": [
                 {
-                    "endpoint_id": "api_endpoint",
+                    "name": "api",
                     "interface": "http",
+                    "port": 8080,
                     "path": "/api"
                 }
-            ]
+            ],
+            "health": {"type": "http", "path": "/healthz", "port": 8080},
+            "env": {"AGENT_PROFILE": "support"}
         }
     }
-    
-    print("Creating runtime (will create Deployment + Service)...")
-    created = runtimes_mgr.create(runtime_spec)
+
+    print("Creating harness runtime (will create Deployment + Service)...")
+    created = harness_mgr.create(harness)
     print(f"Created: {created['metadata']['name']}")
     print(f"Status: {json.dumps(created['status'], indent=2)}")
-    
-    # Get runtime with status
-    print("\nGetting runtime with live status...")
-    runtime = runtimes_mgr.get("rt-api-1")
-    if runtime:
-        print(f"Runtime: {runtime['metadata']['name']}")
-        print(f"State: {runtime['status']['state']}")
-        print(f"Ready replicas: {runtime['status'].get('ready_replicas', 0)}")
-    
+
+    # Get with live status
+    print("\nGetting harness runtime with live status...")
+    fetched = harness_mgr.get("api-harness")
+    if fetched:
+        print(f"Harness: {fetched['metadata']['name']}")
+        print(f"State: {fetched['status']['state']}")
+        print(f"Ready replicas: {fetched['status'].get('ready_replicas', 0)}")
+
     # Update image
-    print("\nUpdating runtime image...")
-    update_spec = {
-        "metadata": runtime_spec["metadata"],
-        "spec": {
-            "compute": runtime_spec["spec"]["compute"],
-            "code": {
-                "image": "nginx:1.25-alpine"
-            }
-        }
-    }
-    updated = runtimes_mgr.update("rt-api-1", update_spec, strategy="merge")
+    print("\nUpdating harness image...")
+    updated = harness_mgr.update(
+        "api-harness",
+        {"spec": {"code": {"image": "acme/support-agent:1.5.0"}}},
+        strategy="merge"
+    )
     print(f"Updated image to: {updated['spec']['code']['image']}")
-    
+
     # Clean up
-    print("\nCleaning up runtime...")
-    runtimes_mgr.delete("rt-api-1")
+    print("\nCleaning up harness runtime...")
+    harness_mgr.delete("api-harness")
     print("Deleted successfully")
 
 
-def example_runtime_batch_job():
-    """Example: Create a batch runtime (Job)."""
-    print("\n=== Runtime Batch Example (Job) ===")
-    
+def example_harness_runtime_batch():
+    """Example: Create a batch HarnessRuntime (Job)."""
+    print("\n=== HarnessRuntime Batch Example (Job) ===")
+
     kubeconfig_path = str(Path.home() / ".kube" / "config")
-    runtimes_mgr = get_manager("runtimes", kubeconfig_path)
-    
-    batch_spec = {
-        "metadata": {
-            "runtime_id": "batch_processor",
-            "name": "data-processor",
-            "version": "1.0.0",
-            "kind": "batch"
-        },
+    harness_mgr = get_manager("harness-runtime", kubeconfig_path)
+
+    batch = {
+        "kind": "HarnessRuntime",
+        "metadata": {"name": "data-processor"},
         "spec": {
+            "runtimeKind": "batch",
             "code": {
                 "image": "python:3.11-slim",
-                "command": ["python", "-c"],
-                "args": ["print('Processing data...'); import time; time.sleep(5); print('Done!')"]
+                "entrypoint": "python",
+                "args": ["-c", "print('Processing data...')"]
             }
         }
     }
-    
-    print("Creating batch job...")
-    created = runtimes_mgr.create(batch_spec)
-    print(f"Created: {created['metadata']['name']}")
+
+    print("Creating batch harness (apiVersion is filled in automatically)...")
+    created = harness_mgr.create(batch)
+    print(f"Created: {created['metadata']['name']} ({created['apiVersion']})")
     print(f"Job status: {created['status']['state']}")
-    
+
     # Poll for completion
     import time
     print("\nWaiting for job to complete...")
     for i in range(10):
-        job = runtimes_mgr.get("batch-processor")
+        job = harness_mgr.get("data-processor")
         if job:
             state = job['status']['state']
             print(f"  Attempt {i+1}: State = {state}")
             if state in ['completed', 'failed']:
                 break
         time.sleep(2)
-    
+
     # Clean up
     print("\nCleaning up job...")
-    runtimes_mgr.delete("batch-processor")
+    harness_mgr.delete("data-processor")
     print("Deleted successfully")
 
 
-def example_runtime_cronjob():
-    """Example: Create a cron runtime (CronJob)."""
-    print("\n=== Runtime Cron Example (CronJob) ===")
-    
+def example_train_loop():
+    """Example: Create a TrainLoop (Job or CronJob)."""
+    print("\n=== TrainLoop Example ===")
+
     kubeconfig_path = str(Path.home() / ".kube" / "config")
-    runtimes_mgr = get_manager("runtimes", kubeconfig_path)
-    
-    cron_spec = {
-        "metadata": {
-            "runtime_id": "hourly_cleanup",
-            "name": "cleanup-task",
-            "version": "1.0.0",
-            "kind": "cron"
-        },
+    train_mgr = get_manager("train-loop", kubeconfig_path)
+
+    # One-time training run (Job)
+    one_off = {
+        "kind": "TrainLoop",
+        "metadata": {"name": "sft-once"},
         "spec": {
-            "code": {
-                "image": "busybox:latest",
-                "command": ["sh", "-c"],
-                "args": ["echo 'Running cleanup...'; date"]
+            "type": "training",
+            "version": "1.0.0",
+            "status": "active",
+            "worker": {
+                "image": "acme/trainer:1.0.0",
+                "env": {"EPOCHS": "3", "BASE_MODEL": "llama-3-70b-instruct"}
             },
-            "schedule": {
-                "type": "cron",
-                "cron_expression": "0 * * * *",
-                "timezone": "UTC"
-            }
+            "execution": {"mode": "continuous", "timeoutSeconds": 7200}
         }
     }
-    
-    print("Creating cron job...")
-    created = runtimes_mgr.create(cron_spec)
+
+    print("Creating one-time training loop (Job)...")
+    created = train_mgr.create(one_off)
     print(f"Created: {created['metadata']['name']}")
-    print(f"Schedule: {created['status'].get('schedule', 'N/A')}")
     print(f"State: {created['status']['state']}")
-    
-    # Get status
-    print("\nGetting cron job status...")
-    cronjob = runtimes_mgr.get("hourly-cleanup")
-    if cronjob:
-        print(f"Active jobs: {cronjob['status'].get('active_jobs', 0)}")
-        print(f"Last schedule: {cronjob['status'].get('last_schedule_time', 'Never')}")
-    
+
+    # Scheduled training run (CronJob)
+    nightly = {
+        "kind": "TrainLoop",
+        "metadata": {"name": "sft-nightly"},
+        "spec": {
+            "type": "training",
+            "version": "1.0.0",
+            "status": "active",
+            "worker": {
+                "image": "acme/trainer:1.0.0",
+                "env": {"HF_TOKEN": "hf_secret_value"}
+            },
+            "execution": {
+                "mode": "scheduled",
+                "timeoutSeconds": 7200,
+                "schedule": {"type": "cron", "cronExpression": "0 2 * * *"}
+            },
+            "lifecycle": {"restartPolicy": {"enabled": True, "maxRestarts": 2}}
+        }
+    }
+
+    print("\nCreating scheduled training loop (CronJob)...")
+    scheduled = train_mgr.create(nightly, secret_fields=["spec.worker.env.HF_TOKEN"])
+    print(f"Created: {scheduled['metadata']['name']}")
+    print(f"Schedule: {scheduled['status'].get('schedule', 'N/A')}")
+
     # Clean up
-    print("\nCleaning up cron job...")
-    runtimes_mgr.delete("hourly-cleanup")
+    print("\nCleaning up training loops...")
+    train_mgr.delete("sft-once")
+    train_mgr.delete("sft-nightly")
     print("Deleted successfully")
 
 
-def example_background_task():
-    """Example: Create a background task."""
-    print("\n=== Background Task Example ===")
-    
+def example_autoscaler():
+    """Example: Attach a ModelAutoScaler to a Model."""
+    print("\n=== ModelAutoScaler Example ===")
+
     kubeconfig_path = str(Path.home() / ".kube" / "config")
-    bg_mgr = get_manager("background", kubeconfig_path)
-    
-    # One-time task (Job)
-    task_spec = {
-        "name": "data-migration",
-        "task": {
-            "image": "python:3.11-slim",
-            "command": ["python", "-c"],
-            "args": ["print('Migrating data...'); import time; time.sleep(3); print('Migration complete!')"],
-            "env": {
-                "DATABASE_URL": "postgresql://localhost/mydb",
-                "MIGRATION_VERSION": "v2.0"
-            }
-        },
-        "retry": {
-            "max_attempts": 3
+    autoscaler_mgr = get_manager("model-autoscaler", kubeconfig_path)
+
+    autoscaler = {
+        "kind": "ModelAutoScaler",
+        "metadata": {"name": "llama-3-70b-autoscaler"},
+        "spec": {
+            "scaleTargetRef": {"kind": "Model", "name": "llama-3-70b-instruct"},
+            "bounds": {"minReplicas": 1, "maxReplicas": 8},
+            "metrics": [
+                {
+                    "type": "aiMetric",
+                    "metric": "inference-queue-depth",
+                    "target": {"metricType": "averageValue", "value": 20}
+                },
+                {
+                    "type": "resource",
+                    "resource": "gpu",
+                    "target": {"metricType": "utilization", "value": 75}
+                }
+            ],
+            "behavior": {"scaleDown": {"stabilizationWindowSeconds": 600}}
         }
     }
-    
-    print("Creating one-time background task (Job)...")
-    created = bg_mgr.create(task_spec)
-    print(f"Created: {created['name']}")
-    print(f"State: {created['status']['state']}")
-    
-    # Scheduled task (CronJob)
-    scheduled_spec = {
-        "name": "daily-backup",
-        "task": {
-            "image": "postgres:15-alpine",
-            "command": ["pg_dump"],
-            "args": ["-h", "localhost", "-U", "user", "mydb"],
-            "env": {
-                "PGPASSWORD": "secret123"
-            }
-        },
-        "schedule": {
-            "type": "cron",
-            "cron_expression": "0 2 * * *"
-        }
-    }
-    
-    print("\nCreating scheduled background task (CronJob)...")
-    scheduled = bg_mgr.create(scheduled_spec, secret_fields=["task.env.PGPASSWORD"])
-    print(f"Created: {scheduled['name']}")
-    print(f"Schedule: {scheduled['status'].get('schedule', 'N/A')}")
-    
+
+    print("Creating model autoscaler...")
+    created = autoscaler_mgr.create(autoscaler)
+    print(f"Created: {created['metadata']['name']}")
+    print(f"Target: {created['spec']['scaleTargetRef']}")
+
+    # Widen the bounds
+    print("\nRaising max replicas...")
+    updated = autoscaler_mgr.update(
+        "llama-3-70b-autoscaler",
+        {"spec": {"bounds": {"minReplicas": 1, "maxReplicas": 16}}},
+        strategy="merge"
+    )
+    print(f"Bounds: {updated['spec']['bounds']}")
+
     # Clean up
-    print("\nCleaning up background tasks...")
-    bg_mgr.delete("data-migration")
-    bg_mgr.delete("daily-backup")
+    print("\nCleaning up autoscaler...")
+    autoscaler_mgr.delete("llama-3-70b-autoscaler")
     print("Deleted successfully")
 
 
 def example_with_secrets():
-    """Example: Create resource with secret fields."""
-    print("\n=== Secret Fields Example (Channels) ===")
-    
+    """Example: Create a CRD with secret fields (Gateway)."""
+    print("\n=== Secret Fields Example (Gateway) ===")
+
     kubeconfig_path = str(Path.home() / ".kube" / "config")
-    channels_mgr = get_manager("channels", kubeconfig_path)
-    
-    channel_spec = {
-        "id": "slack_critical",
-        "name": "Slack Critical Alerts",
-        "type": "slack",
-        "enabled": True,
-        "priority": "critical",
-        "config": {
-            "slack": {
-                "webhook_url": "https://hooks.slack.com/services/SECRET/TOKEN",
-                "channel": "#critical-alerts",
-                "username": "AgentBox Alert"
-            }
+    gateway_mgr = get_manager("gateway", kubeconfig_path)
+
+    gateway = {
+        "kind": "Gateway",
+        "metadata": {"name": "openai-compatible"},
+        "spec": {
+            "modelName": "llama-3-70b-instruct",
+            "litellmParams": {
+                "model": "openai/llama-3-70b-instruct",
+                "apiBase": "http://localhost:8000/v1",
+                "apiKey": "sk-XXXXXXXXXXXX",
+                "rpm": 10000,
+                "tpm": 1000000
+            },
+            "modelInfo": {"id": "llama-3-70b-instruct", "mode": "chat"}
         }
     }
-    
-    print("Creating channel with secret fields...")
-    # webhook_url will be automatically detected as secret
-    created = channels_mgr.create(channel_spec)
-    print(f"Created: {created['name']}")
-    
+
+    print("Creating gateway with secret fields...")
+    # api_key is detected as a secret by convention and stored in a Secret
+    created = gateway_mgr.create(gateway)
+    print(f"Created: {created['metadata']['name']}")
+
     # Get without secrets (default)
-    print("\nGetting channel without secrets...")
-    channel = channels_mgr.get("slack-critical")
-    print(f"Webhook URL in response: {channel['config']['slack'].get('webhook_url', 'REDACTED')}")
-    
+    print("\nGetting gateway without secrets...")
+    fetched = gateway_mgr.get("openai-compatible")
+    print(f"API key in response: {fetched['spec']['litellmParams'].get('apiKey', 'REDACTED')}")
+
     # Get with secrets
-    print("\nGetting channel with secrets...")
-    channel_with_secrets = channels_mgr.get("slack-critical", include_secrets=True)
-    print(f"Webhook URL: {channel_with_secrets['config']['slack']['webhook_url'][:30]}...")
-    
+    print("\nGetting gateway with secrets...")
+    with_secrets = gateway_mgr.get("openai-compatible", include_secrets=True)
+    print(f"API key: {with_secrets['spec']['litellmParams']['apiKey'][:6]}...")
+
     # Clean up
-    print("\nCleaning up channel...")
-    channels_mgr.delete("slack-critical")
+    print("\nCleaning up gateway...")
+    gateway_mgr.delete("openai-compatible")
     print("Deleted successfully")
 
 
 def example_registry_interface():
-    """Example: Using ResourceRegistry interface."""
+    """Example: Using the ResourceRegistry interface."""
     print("\n=== ResourceRegistry Interface Example ===")
-    
+
     kubeconfig_path = str(Path.home() / ".kube" / "config")
-    
+
     # Create a registry instance
     registry = ResourceRegistry(kubeconfig_path)
-    
-    # List all available resource groups
-    print("Available resource groups:")
+
+    # List all available CRDs
+    print("Available CRDs:")
     for group in registry.list_groups():
-        print(f"  - {group}")
-    
-    # Use registry to access different managers
+        print(f"  - {group:26s} -> {get_kind(group)}")
+
+    # Use the registry to access different managers
     print("\nUsing registry to create resources...")
-    
-    # Create a model config
-    models_mgr = registry.get("models")
-    model_spec = {
-        "id": "gpt4",
-        "name": "GPT-4",
-        "provider": "openai",
-        "config": {
-            "api_key": "sk-XXXXXX",
-            "model": "gpt-4",
-            "temperature": 0.7
+
+    tool_mgr = registry.get("tool-server")
+    tool_server = {
+        "kind": "ToolServer",
+        "metadata": {"name": "text-tools"},
+        "spec": {
+            "code": {"image": "acme/text-tools:2.1.0"},
+            "endpoint": {"interface": "http", "port": 8080, "basePath": "/tools"},
+            "tools": [
+                {
+                    "name": "summarize-text",
+                    "description": "Summarize input text into a short abstract",
+                    "path": "/summarize",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"text": {"type": "string"}},
+                        "required": ["text"]
+                    },
+                    "returns": {"type": "object"}
+                }
+            ],
+            "replicas": 2
         }
     }
-    created_model = models_mgr.create(model_spec, secret_fields=["config.api_key"])
-    print(f"Created model: {created_model['name']}")
-    
-    # Create a gateway config
-    gateways_mgr = registry.get("gateways")
-    gateway_spec = {
-        "id": "main_gateway",
-        "name": "Main Gateway",
-        "provider": "openai",
-        "endpoint": "https://api.openai.com/v1"
+    created_tool = tool_mgr.create(tool_server)
+    print(f"Created tool server: {created_tool['metadata']['name']}")
+
+    guardrail_mgr = registry.get("guardrail")
+    guardrail = {
+        "kind": "Guardrail",
+        "metadata": {"name": "throttle-high-rps"},
+        "spec": {
+            "name": "Throttle on high request rate",
+            "status": "enforce",
+            "priority": 10,
+            "conditions": {
+                "all": [
+                    {
+                        "metric": "request-rate",
+                        "operator": "gt",
+                        "threshold": 1000,
+                        "statistic": "Average",
+                        "periodSeconds": 60
+                    }
+                ]
+            },
+            "effect": {"type": "throttle", "parameters": {"throttlePercent": 20}}
+        }
     }
-    created_gateway = gateways_mgr.create(gateway_spec)
-    print(f"Created gateway: {created_gateway['name']}")
-    
-    # List all models
-    all_models = models_mgr.list()
-    print(f"\nTotal models: {len(all_models)}")
-    
+    created_guardrail = guardrail_mgr.create(guardrail)
+    print(f"Created guardrail: {created_guardrail['metadata']['name']}")
+
+    # List all tool servers
+    all_tools = tool_mgr.list()
+    print(f"\nTotal tool servers: {len(all_tools)}")
+
     # Clean up
     print("\nCleaning up...")
-    models_mgr.delete("gpt4")
-    gateways_mgr.delete("main-gateway")
+    tool_mgr.delete("text-tools")
+    guardrail_mgr.delete("throttle-high-rps")
     print("Deleted successfully")
 
 
 def example_convenience_functions():
-    """Example: Using convenience functions."""
+    """Example: Using the convenience functions."""
     print("\n=== Convenience Functions Example ===")
-    
+
     kubeconfig_path = str(Path.home() / ".kube" / "config")
-    
-    # Create using convenience function
-    policy_spec = {
-        "id": "rate_limit_policy",
-        "name": "Rate Limit Policy",
-        "type": "rate_limit",
-        "config": {
-            "requests_per_minute": 100,
-            "burst": 20
+
+    meter = {
+        "kind": "AIMeter",
+        "metadata": {"name": "tenant-token-spend"},
+        "spec": {
+            "usage": {
+                "unit": "totalTokens",
+                "source": {"metric": "gateway-tokens", "statistic": "Sum"}
+            },
+            "attribution": {"dimensions": ["tenant_id"]},
+            "window": {"type": "billingPeriod", "period": "monthly"},
+            "budget": {"limit": 5000, "limitType": "cost", "onExceed": "throttle"}
         }
     }
-    
-    print("Creating policy using convenience function...")
-    created = create_resource("policies", policy_spec, kubeconfig_path)
-    print(f"Created: {created['name']}")
-    
+
+    print("Creating meter using convenience function...")
+    created = create_resource("ai-meter", meter, kubeconfig_path)
+    print(f"Created: {created['metadata']['name']}")
+
     # Get using convenience function
-    print("\nGetting policy...")
-    policy = get_resource("policies", "rate-limit-policy", kubeconfig_path)
-    print(f"Retrieved: {policy['name']} - Type: {policy['type']}")
-    
+    print("\nGetting meter...")
+    fetched = get_resource("ai-meter", "tenant-token-spend", kubeconfig_path)
+    print(f"Retrieved: {fetched['metadata']['name']} - Unit: {fetched['spec']['usage']['unit']}")
+
     # Update using convenience function
-    print("\nUpdating policy...")
-    update_spec = {
-        "id": "rate_limit_policy",
-        "config": {
-            "requests_per_minute": 200
-        }
-    }
-    updated = update_resource("policies", "rate-limit-policy", update_spec, kubeconfig_path)
-    print(f"Updated RPM: {updated['config']['requests_per_minute']}")
-    
+    print("\nUpdating meter budget...")
+    updated = update_resource(
+        "ai-meter",
+        "tenant-token-spend",
+        {"spec": {"budget": {"limit": 8000}}},
+        kubeconfig_path
+    )
+    print(f"Updated budget: {updated['spec']['budget']['limit']}")
+
     # List using convenience function
-    print("\nListing all policies...")
-    policies = list_resources("policies", kubeconfig_path)
-    print(f"Found {len(policies)} policy/policies")
-    
+    print("\nListing all meters...")
+    meters = list_resources("ai-meter", kubeconfig_path)
+    print(f"Found {len(meters)} meter(s)")
+
     # Delete using convenience function
-    print("\nDeleting policy...")
-    delete_resource("policies", "rate-limit-policy", kubeconfig_path)
+    print("\nDeleting meter...")
+    delete_resource("ai-meter", "tenant-token-spend", kubeconfig_path)
     print("Deleted successfully")
 
 
@@ -453,24 +484,24 @@ def main():
     print("=" * 60)
     print("AgentBox CRUD Resource Managers - Usage Examples")
     print("=" * 60)
-    
-    print("\nAvailable resource groups:")
+
+    print(f"\nAgentBox CRDs ({len(CRD_KINDS)}):")
     for group in list_resource_groups():
-        print(f"  - {group}")
-    
+        print(f"  - {group:26s} -> {get_kind(group)}")
+
     # Note: Uncomment the examples you want to run
     # Make sure you have a valid kubeconfig and cluster access
-    
+
     print("\n" + "=" * 60)
     print("NOTE: Examples are commented out by default.")
     print("Uncomment the ones you want to run.")
     print("=" * 60)
-    
+
     # example_config_only_resource()
-    # example_runtime_server()
-    # example_runtime_batch_job()
-    # example_runtime_cronjob()
-    # example_background_task()
+    # example_harness_runtime_server()
+    # example_harness_runtime_batch()
+    # example_train_loop()
+    # example_autoscaler()
     # example_with_secrets()
     # example_registry_interface()
     # example_convenience_functions()
@@ -478,4 +509,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

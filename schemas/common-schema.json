@@ -1,20 +1,409 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/common-schema.json",
   "title": "AgentBox Common Schema Definitions",
-  "description": "Shared JSON Schema definitions reused across AgentBox component schemas",
-  "version": "1.0.0",
+  "description": "Shared JSON Schema definitions reused across the AgentBox CRDs",
+  "version": "2.0.0",
   "type": "object",
   "definitions": {
-    "id": {
-      "type": "string",
-      "pattern": "^[a-z0-9_]+$",
-      "description": "Lowercase identifier using [a-z0-9_]"
+    "apiVersion": {
+      "const": "ai.agentbox.io/v1beta1",
+      "description": "API group/version shared by every AgentBox CRD"
     },
-    "non_empty_string": {
+    "dnsName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "maxLength": 253,
+      "description": "RFC 1123 name, as used by metadata.name"
+    },
+    "objectMeta": {
+      "type": "object",
+      "description": "Standard Kubernetes object metadata. Anything descriptive that is not name, namespace, labels or annotations belongs in spec.",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/dnsName"
+        },
+        "namespace": {
+          "$ref": "#/definitions/dnsName"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "condition": {
+      "type": "object",
+      "required": [
+        "type",
+        "status"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "status": {
+          "enum": [
+            "True",
+            "False",
+            "Unknown"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "lastTransitionTime": {
+          "$ref": "#/definitions/isoDatetime"
+        }
+      },
+      "additionalProperties": false
+    },
+    "resourceStatus": {
+      "type": "object",
+      "description": "Standard status subresource shared by every AgentBox CRD",
+      "properties": {
+        "state": {
+          "enum": [
+            "pending",
+            "active",
+            "degraded",
+            "suspended",
+            "completed",
+            "failed",
+            "inactive",
+            "unknown"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "observedGeneration": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/condition"
+          }
+        },
+        "lastTransitionTime": {
+          "$ref": "#/definitions/isoDatetime"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total replicas observed. Read by the scale subresource."
+        },
+        "readyReplicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selector": {
+          "type": "string",
+          "description": "Label selector in string form. Read by the scale subresource."
+        }
+      },
+      "additionalProperties": true
+    },
+    "replicaBounds": {
+      "type": "object",
+      "description": "Replica bounds shared by every AutoScaler CRD",
+      "required": [
+        "maxReplicas"
+      ],
+      "properties": {
+        "minReplicas": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1
+        },
+        "maxReplicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      },
+      "additionalProperties": false
+    },
+    "scalingMetric": {
+      "type": "object",
+      "description": "A single scaling signal, sourced from an AIMetric or a raw resource metric",
+      "required": [
+        "type",
+        "target"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "aiMetric",
+            "resource",
+            "external"
+          ]
+        },
+        "metric": {
+          "$ref": "common-schema.json#/definitions/dnsName",
+          "description": "Name of the AIMetric supplying this signal."
+        },
+        "resource": {
+          "enum": [
+            "cpu",
+            "memory",
+            "gpu",
+            "gpuMemory"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "target": {
+          "type": "object",
+          "required": [
+            "metricType",
+            "value"
+          ],
+          "properties": {
+            "metricType": {
+              "enum": [
+                "utilization",
+                "averageValue",
+                "value"
+              ]
+            },
+            "value": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "aiMetric"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "metric"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "resource"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "resource"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "external"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "name"
+            ]
+          }
+        }
+      ]
+    },
+    "scalingBehavior": {
+      "type": "object",
+      "description": "Stabilization and rate limits applied to scale up/down decisions",
+      "properties": {
+        "scaleUp": {
+          "$ref": "#/definitions/scalingRules"
+        },
+        "scaleDown": {
+          "$ref": "#/definitions/scalingRules"
+        },
+        "scaleToZero": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "idleSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 300
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "scalingRules": {
+      "type": "object",
+      "properties": {
+        "stabilizationWindowSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 300,
+          "maximum": 3600
+        },
+        "selectPolicy": {
+          "enum": [
+            "max",
+            "min",
+            "disabled"
+          ],
+          "default": "max"
+        },
+        "policies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "type",
+              "value",
+              "periodSeconds"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "pods",
+                  "percent"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "periodSeconds": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "computeResources": {
+      "type": "object",
+      "description": "Compute request shared by workload-backed CRDs",
+      "properties": {
+        "cpu": {
+          "type": "object",
+          "properties": {
+            "cores": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1024
+            },
+            "threads": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "memoryMb": {
+              "type": "integer",
+              "minimum": 16
+            }
+          },
+          "additionalProperties": false
+        },
+        "gpu": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "type": {
+              "type": "string"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "memoryMb": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "storage": {
+          "type": "object",
+          "properties": {
+            "persist": {
+              "type": "boolean",
+              "default": false
+            },
+            "sizeInGb": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "iops": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "nonEmptyString": {
       "type": "string",
       "minLength": 1
     },
-    "iso_datetime": {
+    "isoDatetime": {
       "type": "string",
       "format": "date-time"
     },
@@ -24,77 +413,80 @@
         "type": "string"
       }
     },
-    "priority": {
-      "enum": ["critical", "high", "medium", "low"]
-    },
-    "email": {
-      "type": "string",
-      "format": "email"
-    },
     "uri": {
       "type": "string",
       "format": "uri"
     },
-    "secret_ref": {
+    "secretRef": {
       "type": "string",
       "pattern": "^secret://"
     },
-    "aws_arn": {
-      "type": "string",
-      "pattern": "^arn:aws:"
-    },
-    "retry_policy": {
+    "retryPolicy": {
       "type": "object",
       "properties": {
         "enabled": {
           "type": "boolean",
           "default": true
         },
-        "max_retries": {
+        "maxRetries": {
           "type": "integer",
           "minimum": 0,
           "maximum": 10,
           "default": 3
         },
-        "retry_delay_seconds": {
+        "retryDelaySeconds": {
           "type": "integer",
           "minimum": 1,
           "default": 60
         },
-        "backoff_multiplier": {
+        "backoffMultiplier": {
           "type": "number",
           "minimum": 1,
           "default": 2
         },
-        "retry_on_status_codes": {
+        "retryOnStatusCodes": {
           "type": "array",
           "items": {
             "type": "integer"
           },
-          "default": [500, 502, 503, 504, 429]
+          "default": [
+            500,
+            502,
+            503,
+            504,
+            429
+          ]
         }
       },
       "additionalProperties": false
     },
-    "auth_type": {
+    "authType": {
       "enum": [
         "none",
         "bearer",
         "basic",
-        "api_key",
+        "apiKey",
         "oauth2",
         "jwt",
         "hmac",
-        "iam_role",
-        "service_account",
-        "mutual_tls",
+        "iamRole",
+        "serviceAccount",
+        "mutualTls",
         "sasl"
       ]
     },
-    "http_method": {
-      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+    "httpMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "HEAD",
+        "OPTIONS"
+      ]
     },
-    "storage_backend": {
+    "storageBackend": {
       "enum": [
         "memory",
         "persistent",
@@ -123,11 +515,11 @@
         "owner": {
           "type": "string"
         },
-        "created_at": {
-          "$ref": "#/definitions/iso_datetime"
+        "createdAt": {
+          "$ref": "#/definitions/isoDatetime"
         },
-        "updated_at": {
-          "$ref": "#/definitions/iso_datetime"
+        "updatedAt": {
+          "$ref": "#/definitions/isoDatetime"
         },
         "version": {
           "type": "string"
@@ -135,35 +527,59 @@
       },
       "additionalProperties": false
     },
-    "comparison_operator": {
-      "enum": ["gt", "gte", "lt", "lte", "eq", "neq", "in", "not_in", "matches", "exists"]
-    },
-    "weekday": {
+    "comparisonOperator": {
       "enum": [
-        "monday",
-        "tuesday",
-        "wednesday",
-        "thursday",
-        "friday",
-        "saturday",
-        "sunday"
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "eq",
+        "neq",
+        "in",
+        "notIn",
+        "matches",
+        "exists"
       ]
     },
-    "hh_mm_time": {
-      "type": "string",
-      "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
-      "description": "24h time format HH:MM"
-    },
-    "throttling_rate_limits": {
+    "scaleTargetRef": {
       "type": "object",
+      "description": "Reference to the resource an AutoScaler owns",
+      "required": [
+        "kind",
+        "name"
+      ],
       "properties": {
-        "max_alerts_per_minute": { "type": "integer", "minimum": 0 },
-        "max_alerts_per_hour": { "type": "integer", "minimum": 0 },
-        "max_alerts_per_day": { "type": "integer", "minimum": 0 },
-        "burst_allowance": { "type": "integer", "minimum": 0 }
+        "apiVersion": {
+          "$ref": "#/definitions/apiVersion"
+        },
+        "kind": {
+          "enum": [
+            "Model",
+            "ModelAutoScaler",
+            "HarnessRuntime",
+            "HarnessSwarmAutoScaler",
+            "AgentIdP",
+            "ToolServer",
+            "ToolServerAutoScaler",
+            "Gateway",
+            "AIMetric",
+            "AIMeter",
+            "TrainLoop",
+            "Dataset",
+            "Evaluator",
+            "Guardrail",
+            "Tracer",
+            "Recipe"
+          ]
+        },
+        "name": {
+          "$ref": "#/definitions/dnsName"
+        },
+        "namespace": {
+          "$ref": "#/definitions/dnsName"
+        }
       },
       "additionalProperties": false
     }
   }
 }
-

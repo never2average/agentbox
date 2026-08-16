@@ -1,53 +1,76 @@
 """
 Resource Registry Module
-Central registry for mapping resource groups to manager classes
+Central registry mapping AgentBox CRD resource groups to manager classes
 """
 from typing import Dict, Type, Optional
 from k8s_modules.base_resource import BaseResourceManager
-from k8s_modules.resources.config_only import (
-    create_agents_manager,
-    create_channels_manager,
-    create_gateways_manager,
-    create_governance_manager,
-    create_hardware_manager,
-    create_io_manager,
-    create_logs_manager,
-    create_metric_manager,
-    create_models_manager,
-    create_notifications_manager,
-    create_policies_manager,
-    create_recipe_manager,
-    create_escalations_manager,
-    create_evals_manager,
-    create_tools_manager
-)
-from k8s_modules.resources.runtimes import RuntimesManager
-from k8s_modules.resources.background import BackgroundManager
+from k8s_modules.resources.config_only import create_config_manager
+from k8s_modules.resources.harness_runtime import HarnessRuntimeManager
+from k8s_modules.resources.tool_server import ToolServerManager
+from k8s_modules.resources.train_loop import TrainLoopManager
 
 
-# Registry mapping resource groups to factory functions
-_REGISTRY: Dict[str, any] = {
-    # Config-only resources
-    'agents': create_agents_manager,
-    'channels': create_channels_manager,
-    'gateways': create_gateways_manager,
-    'governance': create_governance_manager,
-    'hardware': create_hardware_manager,
-    'io': create_io_manager,
-    'logs': create_logs_manager,
-    'metric': create_metric_manager,
-    'models': create_models_manager,
-    'notifications': create_notifications_manager,
-    'policies': create_policies_manager,
-    'recipe': create_recipe_manager,
-    'escalations': create_escalations_manager,
-    'evals': create_evals_manager,
-    'tools': create_tools_manager,
-    
-    # Workload resources
-    'runtimes': RuntimesManager,
-    'background': BackgroundManager
+# The AgentBox CRD set: resource group -> CRD kind.
+CRD_KINDS: Dict[str, str] = {
+    # Serving plane
+    'model': 'Model',
+    'model-autoscaler': 'ModelAutoScaler',
+    'harness-runtime': 'HarnessRuntime',
+    'harness-swarm-autoscaler': 'HarnessSwarmAutoScaler',
+    'agent-idp': 'AgentIdP',
+    'tool-server': 'ToolServer',
+    'tool-server-autoscaler': 'ToolServerAutoScaler',
+    'gateway': 'Gateway',
+    'ai-metric': 'AIMetric',
+    'ai-meter': 'AIMeter',
+
+    # Training plane
+    'train-loop': 'TrainLoop',
+    'dataset': 'Dataset',
+    'evaluator': 'Evaluator',
+    'guardrail': 'Guardrail',
+    'tracer': 'Tracer',
+    'recipe': 'Recipe'
 }
+
+# CRDs backed by Kubernetes workloads
+_WORKLOAD_MANAGERS: Dict[str, Type[BaseResourceManager]] = {
+    'harness-runtime': HarnessRuntimeManager,
+    'tool-server': ToolServerManager,
+    'train-loop': TrainLoopManager
+}
+
+# Registry mapping CRD resource groups to factory functions
+_REGISTRY: Dict[str, any] = {
+    group: _WORKLOAD_MANAGERS.get(
+        group,
+        lambda kubeconfig_path, namespace='agentbox-system', _group=group:
+            create_config_manager(_group, kubeconfig_path, namespace)
+    )
+    for group in CRD_KINDS
+}
+
+
+def get_kind(resource_group: str) -> str:
+    """
+    Return the CRD kind for a resource group.
+
+    Args:
+        resource_group: Resource group name (e.g. "harness-runtime")
+
+    Returns:
+        CRD kind (e.g. "HarnessRuntime")
+
+    Raises:
+        ValueError: If the resource group is not registered
+    """
+    if resource_group not in CRD_KINDS:
+        available = ', '.join(sorted(CRD_KINDS))
+        raise ValueError(
+            f"Unknown resource group '{resource_group}'. "
+            f"Available groups: {available}"
+        )
+    return CRD_KINDS[resource_group]
 
 
 def get_manager(
@@ -59,7 +82,7 @@ def get_manager(
     Get a resource manager for the specified resource group.
     
     Args:
-        resource_group: Resource group name (e.g., "runtimes", "agents")
+        resource_group: Resource group name (e.g., "harness-runtime", "model")
         kubeconfig_path: Path to kubeconfig file
         namespace: Kubernetes namespace (default: agentbox-system)
         
@@ -70,11 +93,11 @@ def get_manager(
         ValueError: If resource group is not registered
         
     Examples:
-        >>> mgr = get_manager("runtimes", "/path/to/kubeconfig")
-        >>> mgr.create(runtime_spec)
+        >>> mgr = get_manager("harness-runtime", "/path/to/kubeconfig")
+        >>> mgr.create(harness_spec)
         
-        >>> mgr = get_manager("agents", "/path/to/kubeconfig")
-        >>> agents = mgr.list()
+        >>> mgr = get_manager("model", "/path/to/kubeconfig")
+        >>> models = mgr.list()
     """
     if resource_group not in _REGISTRY:
         available = ', '.join(sorted(_REGISTRY.keys()))
@@ -104,39 +127,43 @@ def list_resource_groups() -> list:
     Examples:
         >>> groups = list_resource_groups()
         >>> print(groups)
-        ['agents', 'background', 'channels', ...]
+        ['agent-idp', 'ai-meter', 'ai-metric', ...]
     """
     return sorted(_REGISTRY.keys())
 
 
 def register_resource_group(
     resource_group: str,
-    manager_class_or_factory: any
+    manager_class_or_factory: any,
+    kind: Optional[str] = None
 ) -> None:
     """
     Register a custom resource group with a manager class or factory.
-    
+
     Args:
         resource_group: Resource group name
         manager_class_or_factory: Manager class or factory function
-        
+        kind: CRD kind for the group (defaults to the group name)
+
     Examples:
         >>> class CustomManager(BaseResourceManager):
         ...     pass
-        >>> register_resource_group("custom", CustomManager)
+        >>> register_resource_group("custom", CustomManager, "Custom")
     """
     _REGISTRY[resource_group] = manager_class_or_factory
+    CRD_KINDS[resource_group] = kind or resource_group
 
 
 def unregister_resource_group(resource_group: str) -> None:
     """
     Unregister a resource group.
-    
+
     Args:
         resource_group: Resource group name
     """
     if resource_group in _REGISTRY:
         del _REGISTRY[resource_group]
+    CRD_KINDS.pop(resource_group, None)
 
 
 class ResourceRegistry:
@@ -145,8 +172,8 @@ class ResourceRegistry:
     
     Examples:
         >>> registry = ResourceRegistry("/path/to/kubeconfig")
-        >>> runtimes_mgr = registry.get("runtimes")
-        >>> runtimes_mgr.create(spec)
+        >>> harness_mgr = registry.get("harness-runtime")
+        >>> harness_mgr.create(spec)
     """
     
     def __init__(self, kubeconfig_path: str, namespace: str = "agentbox-system"):

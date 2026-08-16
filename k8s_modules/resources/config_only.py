@@ -8,10 +8,11 @@ from k8s_modules.base_resource import BaseResourceManager
 
 class ConfigOnlyResourceManager(BaseResourceManager):
     """
-    Manager for resources that only store configuration without creating workloads.
-    
-    Applicable to: agents, channels, gateways, governance, hardware, io, logs,
-                    metric, models, notifications, policies, recipe, escalations, evals
+    Manager for CRDs that only store configuration without creating workloads.
+
+    Applicable to: model, model-autoscaler, harness-swarm-autoscaler, agent-idp,
+                    tool-server-autoscaler, gateway, ai-metric, ai-meter,
+                    dataset, evaluator, guardrail, tracer, recipe
     """
     
     def __init__(self, resource_group: str, kubeconfig_path: str, namespace: str = "agentbox-system"):
@@ -81,79 +82,20 @@ class ConfigOnlyResourceManager(BaseResourceManager):
         }
 
 
-# Factory functions for each config-only resource type
+def create_config_manager(
+    resource_group: str,
+    kubeconfig_path: str,
+    namespace: str = "agentbox-system"
+) -> ConfigOnlyResourceManager:
+    """
+    Create a config-only manager for a CRD resource group.
 
-def create_agents_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for agents resources."""
-    return ConfigOnlyResourceManager("agents", kubeconfig_path, namespace)
+    Args:
+        resource_group: CRD resource group name (e.g. "model", "ai-meter")
+        kubeconfig_path: Path to kubeconfig
+        namespace: Kubernetes namespace
 
-
-def create_channels_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for channels resources."""
-    return ConfigOnlyResourceManager("channels", kubeconfig_path, namespace)
-
-
-def create_gateways_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for gateways resources."""
-    return ConfigOnlyResourceManager("gateways", kubeconfig_path, namespace)
-
-
-def create_governance_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for governance resources."""
-    return ConfigOnlyResourceManager("governance", kubeconfig_path, namespace)
-
-
-def create_hardware_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for hardware resources."""
-    return ConfigOnlyResourceManager("hardware", kubeconfig_path, namespace)
-
-
-def create_io_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for io resources."""
-    return ConfigOnlyResourceManager("io", kubeconfig_path, namespace)
-
-
-def create_logs_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for logs resources."""
-    return ConfigOnlyResourceManager("logs", kubeconfig_path, namespace)
-
-
-def create_metric_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for metric resources."""
-    return ConfigOnlyResourceManager("metric", kubeconfig_path, namespace)
-
-
-def create_models_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for models resources."""
-    return ConfigOnlyResourceManager("models", kubeconfig_path, namespace)
-
-
-def create_notifications_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for notifications resources."""
-    return ConfigOnlyResourceManager("notifications", kubeconfig_path, namespace)
-
-
-def create_policies_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for policies resources."""
-    return ConfigOnlyResourceManager("policies", kubeconfig_path, namespace)
-
-
-def create_recipe_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for recipe resources."""
-    return ConfigOnlyResourceManager("recipe", kubeconfig_path, namespace)
-
-
-def create_escalations_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for escalations resources."""
-    return ConfigOnlyResourceManager("escalations", kubeconfig_path, namespace)
-
-
-def create_evals_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for evals resources."""
-    return ConfigOnlyResourceManager("evals", kubeconfig_path, namespace)
-
-
-def create_tools_manager(kubeconfig_path: str, namespace: str = "agentbox-system") -> ConfigOnlyResourceManager:
-    """Create manager for tools resources."""
-    return ConfigOnlyResourceManager("tools", kubeconfig_path, namespace)
-
+    Returns:
+        Config-only resource manager for the group
+    """
+    return ConfigOnlyResourceManager(resource_group, kubeconfig_path, namespace)

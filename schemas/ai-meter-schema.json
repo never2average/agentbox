@@ -1,0 +1,337 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/ai-meter-schema.json",
+  "title": "AgentBox AIMeter",
+  "description": "Observability-plane meter: turns AIMetric streams into billable usage (tokens, calls, GPU-seconds), attributes it to a tenant dimension, prices it and enforces budgets.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "AIMeter",
+    "scope": "Namespaced",
+    "shortNames": [
+      "aime"
+    ],
+    "slug": "ai-meter",
+    "plural": "aimeters"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "AIMeter"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "usage",
+        "window"
+      ],
+      "properties": {
+        "usage": {
+          "type": "object",
+          "description": "What is being metered and where the raw counts come from.",
+          "required": [
+            "unit",
+            "source"
+          ],
+          "properties": {
+            "unit": {
+              "$ref": "#/definitions/meterUnit"
+            },
+            "source": {
+              "type": "object",
+              "required": [
+                "metric"
+              ],
+              "properties": {
+                "metric": {
+                  "$ref": "common-schema.json#/definitions/dnsName",
+                  "description": "Name of the AIMetric supplying raw counts."
+                },
+                "statistic": {
+                  "enum": [
+                    "Sum",
+                    "Average",
+                    "Maximum",
+                    "Minimum",
+                    "SampleCount"
+                  ],
+                  "default": "Sum"
+                }
+              },
+              "additionalProperties": false
+            },
+            "subjects": {
+              "type": "array",
+              "description": "Names of the resources whose usage is metered.",
+              "items": {
+                "$ref": "common-schema.json#/definitions/dnsName"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "attribution": {
+          "type": "object",
+          "description": "Dimensions the usage is split by, typically the billing tenant.",
+          "properties": {
+            "dimensions": {
+              "type": "array",
+              "items": {
+                "$ref": "common-schema.json#/definitions/nonEmptyString"
+              }
+            },
+            "defaultTenant": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "window": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "tumbling",
+                "sliding",
+                "billingPeriod"
+              ]
+            },
+            "durationSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "period": {
+              "enum": [
+                "hourly",
+                "daily",
+                "weekly",
+                "monthly"
+              ]
+            },
+            "timezone": {
+              "type": "string",
+              "default": "UTC"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Accounting window: tumbling, sliding, or a billing period."
+        },
+        "pricing": {
+          "type": "object",
+          "description": "Optional cost model applied to metered usage.",
+          "properties": {
+            "currency": {
+              "type": "string",
+              "default": "USD"
+            },
+            "model": {
+              "enum": [
+                "flat",
+                "tiered",
+                "perUnit"
+              ],
+              "default": "perUnit"
+            },
+            "unitPrice": {
+              "type": "number",
+              "minimum": 0
+            },
+            "perUnits": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            },
+            "tiers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "upTo",
+                  "unitPrice"
+                ],
+                "properties": {
+                  "upTo": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "unitPrice": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "budget": {
+          "type": "object",
+          "description": "Quota or spend ceiling enforced for the window.",
+          "properties": {
+            "limit": {
+              "type": "number",
+              "minimum": 0
+            },
+            "limitType": {
+              "enum": [
+                "usage",
+                "cost"
+              ],
+              "default": "cost"
+            },
+            "alertThresholdsPercent": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "maxItems": 10
+            },
+            "onExceed": {
+              "enum": [
+                "alert",
+                "throttle",
+                "block"
+              ],
+              "default": "alert"
+            }
+          },
+          "additionalProperties": false
+        },
+        "export": {
+          "type": "object",
+          "description": "Where metered records are emitted for billing or analytics.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "destination": {
+              "enum": [
+                "prometheus",
+                "otlp",
+                "s3",
+                "kafka",
+                "webhook"
+              ]
+            },
+            "endpoint": {
+              "$ref": "common-schema.json#/definitions/uri"
+            },
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 300
+            }
+          },
+          "additionalProperties": false
+        },
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 400,
+          "description": "How long metered records are kept."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Set false to stop metering without deleting the meter."
+        }
+      },
+      "additionalProperties": false,
+      "x-agentbox-rules": [
+        {
+          "rule": "self.window.type != 'billingPeriod' || has(self.window.period)",
+          "message": "window.period is required for a billingPeriod window"
+        },
+        {
+          "rule": "self.window.type == 'billingPeriod' || has(self.window.durationSeconds)",
+          "message": "window.durationSeconds is required for tumbling and sliding windows"
+        },
+        {
+          "rule": "!has(self.pricing) || self.pricing.model != 'tiered' || has(self.pricing.tiers)",
+          "message": "pricing.tiers is required when pricing.model is tiered"
+        }
+      ]
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "meterUnit": {
+      "enum": [
+        "inputTokens",
+        "outputTokens",
+        "totalTokens",
+        "requests",
+        "toolCalls",
+        "agentSessions",
+        "gpuSeconds",
+        "cpuSeconds",
+        "trainingSteps",
+        "bytesProcessed"
+      ]
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "AIMeter",
+      "metadata": {
+        "name": "tenant-token-spend"
+      },
+      "spec": {
+        "usage": {
+          "unit": "totalTokens",
+          "source": {
+            "metric": "gateway-tokens",
+            "statistic": "Sum"
+          },
+          "subjects": [
+            "openai-compatible"
+          ]
+        },
+        "attribution": {
+          "dimensions": [
+            "tenant_id"
+          ]
+        },
+        "window": {
+          "type": "billingPeriod",
+          "period": "monthly"
+        },
+        "pricing": {
+          "currency": "USD",
+          "model": "perUnit",
+          "unitPrice": 0.6,
+          "perUnits": 1000000
+        },
+        "budget": {
+          "limit": 5000,
+          "limitType": "cost",
+          "onExceed": "throttle"
+        }
+      }
+    }
+  ]
+}

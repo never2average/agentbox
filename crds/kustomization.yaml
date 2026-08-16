@@ -1,0 +1,20 @@
+# Install the AgentBox CRDs:  kubectl apply -k crds/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - agent-idp.yaml
+  - ai-meter.yaml
+  - ai-metric.yaml
+  - dataset.yaml
+  - evaluator.yaml
+  - gateway.yaml
+  - guardrail.yaml
+  - harness-runtime.yaml
+  - harness-swarm-autoscaler.yaml
+  - model-autoscaler.yaml
+  - model.yaml
+  - recipe.yaml
+  - tool-server-autoscaler.yaml
+  - tool-server.yaml
+  - tracer.yaml
+  - train-loop.yaml

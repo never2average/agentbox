@@ -1,0 +1,382 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/guardrail-schema.json",
+  "title": "AgentBox Guardrail",
+  "description": "Governance-plane guardrail: metric-driven conditions and the effect enforced when they trip.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "Guardrail",
+    "scope": "Namespaced",
+    "shortNames": [
+      "gr"
+    ],
+    "slug": "guardrail",
+    "plural": "guardrails"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "Guardrail"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable name for this guardrail."
+        },
+        "description": {
+          "type": "string",
+          "description": "What this guardrail protects against."
+        },
+        "status": {
+          "$ref": "#/definitions/policyStatus",
+          "description": "Whether the guardrail is enforced, permissive or disabled."
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 100,
+          "description": "Evaluation order. Lower numbers are evaluated first."
+        },
+        "metricsSource": {
+          "enum": [
+            "logsOnly"
+          ],
+          "description": "Where the metrics in the conditions are read from."
+        },
+        "requireValidLogs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to fail closed when the underlying signal is missing."
+        },
+        "scope": {
+          "$ref": "#/definitions/scope",
+          "description": "Which resources this guardrail applies to."
+        },
+        "conditions": {
+          "$ref": "#/definitions/conditionsBlock",
+          "description": "Metric conditions that trip this guardrail."
+        },
+        "metricMath": {
+          "$ref": "#/definitions/metricMath",
+          "description": "Expression evaluated over metrics before the conditions."
+        },
+        "effect": {
+          "$ref": "#/definitions/effect",
+          "description": "What happens when the conditions trip."
+        },
+        "cooldownSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 60,
+          "description": "Minimum time between two firings."
+        },
+        "suppressForSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "How long to stay silent after firing."
+        },
+        "tags": {
+          "$ref": "./common-schema.json#/definitions/tags",
+          "description": "Free-form labels for discovery."
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "priority",
+        "conditions",
+        "effect"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "policyStatus": {
+      "enum": [
+        "enforce",
+        "monitor",
+        "disabled"
+      ]
+    },
+    "targetType": {
+      "enum": [
+        "agent",
+        "tool",
+        "gateway",
+        "channel",
+        "hardware",
+        "runtime",
+        "model"
+      ]
+    },
+    "attributeMatch": {
+      "type": "object",
+      "required": [
+        "key",
+        "op"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "op": {
+          "$ref": "./common-schema.json#/definitions/comparisonOperator"
+        },
+        "value": {}
+      },
+      "additionalProperties": false
+    },
+    "dimensionFilter": {
+      "type": "object",
+      "required": [
+        "name",
+        "op"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "eq",
+            "in",
+            "matches"
+          ]
+        },
+        "value": {}
+      },
+      "additionalProperties": false
+    },
+    "condition": {
+      "type": "object",
+      "required": [
+        "metric",
+        "operator",
+        "threshold",
+        "statistic",
+        "periodSeconds"
+      ],
+      "properties": {
+        "metric": {
+          "$ref": "common-schema.json#/definitions/dnsName",
+          "description": "Name of the AIMetric this condition reads."
+        },
+        "operator": {
+          "enum": [
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "eq",
+            "neq"
+          ]
+        },
+        "threshold": {
+          "type": "number"
+        },
+        "statistic": {
+          "enum": [
+            "Average",
+            "Sum",
+            "Minimum",
+            "Maximum",
+            "p50",
+            "p90",
+            "p95",
+            "p99"
+          ]
+        },
+        "periodSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60
+        },
+        "evaluationPeriods": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "datapointsToTrigger": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "dimensionFilters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/dimensionFilter"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "conditionsBlock": {
+      "type": "object",
+      "properties": {
+        "all": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/condition"
+          }
+        },
+        "any": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/condition"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "targetType": {
+          "$ref": "#/definitions/targetType"
+        },
+        "targets": {
+          "type": "array",
+          "description": "Names this guardrail applies to.",
+          "items": {
+            "$ref": "common-schema.json#/definitions/dnsName"
+          }
+        },
+        "selector": {
+          "type": "object",
+          "properties": {
+            "tags": {
+              "$ref": "./common-schema.json#/definitions/tags"
+            },
+            "attributesMatch": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/attributeMatch"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "metricMath": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "expression": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "nanHandling": {
+          "enum": [
+            "treatAsZero",
+            "propagate",
+            "skip"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "effect": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "allow",
+            "deny",
+            "limit",
+            "throttle",
+            "scale",
+            "route",
+            "pause",
+            "resume",
+            "notify"
+          ]
+        },
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "limitPerMinute": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "throttlePercent": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "routeToGateway": {
+              "$ref": "common-schema.json#/definitions/dnsName",
+              "description": "Name of the gateway to route to."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "Guardrail",
+      "metadata": {
+        "name": "throttle-high-rps"
+      },
+      "spec": {
+        "name": "Throttle on high request rate",
+        "status": "enforce",
+        "priority": 10,
+        "conditions": {
+          "all": [
+            {
+              "metric": "request-rate",
+              "operator": "gt",
+              "threshold": 1000,
+              "statistic": "Average",
+              "periodSeconds": 60
+            }
+          ]
+        },
+        "effect": {
+          "type": "throttle",
+          "parameters": {
+            "throttlePercent": 20
+          }
+        }
+      }
+    }
+  ]
+}

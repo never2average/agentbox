@@ -1,0 +1,146 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentbox.io/schemas/tool-server-autoscaler-schema.json",
+  "title": "AgentBox ToolServerAutoScaler",
+  "description": "Serving-plane autoscaler for a ToolServer: scales tool-execution replicas on call rate, concurrency and latency signals.",
+  "version": "2.0.0",
+  "x-agentbox-crd": {
+    "group": "ai.agentbox.io",
+    "version": "v1beta1",
+    "kind": "ToolServerAutoScaler",
+    "scope": "Namespaced",
+    "shortNames": [
+      "tsas"
+    ],
+    "slug": "tool-server-autoscaler",
+    "plural": "toolserverautoscalers"
+  },
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common-schema.json#/definitions/apiVersion"
+    },
+    "kind": {
+      "const": "ToolServerAutoScaler"
+    },
+    "metadata": {
+      "$ref": "common-schema.json#/definitions/objectMeta"
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "scaleTargetRef",
+        "bounds",
+        "metrics"
+      ],
+      "properties": {
+        "scaleTargetRef": {
+          "allOf": [
+            {
+              "$ref": "common-schema.json#/definitions/scaleTargetRef"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "const": "ToolServer"
+                }
+              }
+            }
+          ],
+          "description": "ToolServer this autoscaler owns."
+        },
+        "bounds": {
+          "$ref": "common-schema.json#/definitions/replicaBounds",
+          "description": "Replica floor and ceiling for the tool server."
+        },
+        "metrics": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "common-schema.json#/definitions/scalingMetric"
+          },
+          "maxItems": 8,
+          "description": "Signals the scaling decision reads, typically call rate or latency."
+        },
+        "behavior": {
+          "$ref": "common-schema.json#/definitions/scalingBehavior",
+          "description": "Stabilisation windows and rate limits on scale up and scale down."
+        },
+        "concurrency": {
+          "type": "object",
+          "description": "Per-replica concurrency envelope used to derive the replica target.",
+          "properties": {
+            "targetInFlightCalls": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxInFlightCalls": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Set false to pause scaling without deleting the autoscaler."
+        }
+      },
+      "additionalProperties": false,
+      "x-agentbox-rules": [
+        {
+          "rule": "self.bounds.maxReplicas >= self.bounds.minReplicas",
+          "message": "bounds.maxReplicas must be >= bounds.minReplicas"
+        },
+        {
+          "rule": "self.scaleTargetRef.kind == 'ToolServer'",
+          "message": "scaleTargetRef must reference a ToolServer"
+        }
+      ]
+    },
+    "status": {
+      "$ref": "common-schema.json#/definitions/resourceStatus"
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "apiVersion": "ai.agentbox.io/v1beta1",
+      "kind": "ToolServerAutoScaler",
+      "metadata": {
+        "name": "summarize-text-autoscaler"
+      },
+      "spec": {
+        "scaleTargetRef": {
+          "kind": "ToolServer",
+          "name": "summarize-text"
+        },
+        "bounds": {
+          "minReplicas": 1,
+          "maxReplicas": 20
+        },
+        "metrics": [
+          {
+            "type": "aiMetric",
+            "metric": "tool-call-rate",
+            "target": {
+              "metricType": "averageValue",
+              "value": 50
+            }
+          }
+        ],
+        "concurrency": {
+          "targetInFlightCalls": 10,
+          "maxInFlightCalls": 25
+        }
+      }
+    }
+  ]
+}
