@@ -74,7 +74,9 @@ with a **10% tolerance band** so a metric sitting near its target does not cause
 several metrics disagree, the highest demand wins — the same rule HPA uses.
 
 `scaleToZero.enabled` lets the floor drop to 0; otherwise `bounds.minReplicas` is clamped to
-at least 1.
+at least 1. At zero replicas there is no per-replica average to reason about, so any demand
+at all brings one replica back and normal scaling resumes from there — subject to the same
+scale-up stabilization window.
 
 Autoscaling is deliberately *declarative all the way down*: the autoscaler patches the
 target's `spec.replicas`, and the target's own reconciler moves the Deployment. You can

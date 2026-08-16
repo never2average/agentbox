@@ -274,6 +274,62 @@ REJECTIONS = [
         "metadata": {"name": "bad-evaluator"},
         "spec": {"name": "x", "dataset": {}, "scoring": {"metrics": [
             {"metric": {"type": "contains", "needle": "x"}}]}}}),
+    ("CEL: Gateway serving without an image", {
+        "apiVersion": "ai.agentbox.io/v1beta1", "kind": "Gateway",
+        "metadata": {"name": "bad-gateway"},
+        "spec": {"modelName": "x", "litellmParams": {"model": "openai/x", "apiBase": "http://x"},
+                 "modelInfo": {"id": "x"}, "serving": {"port": 4000}}}),
+    ("Model with an invalid hub", {
+        "apiVersion": "ai.agentbox.io/v1beta1", "kind": "Model",
+        "metadata": {"name": "bad-hub"},
+        "spec": {"modelName": "x", "modelHub": "napster", "hubModelId": "org/x"}}),
+    ("Model serving image pattern violation", {
+        "apiVersion": "ai.agentbox.io/v1beta1", "kind": "Model",
+        "metadata": {"name": "bad-serving-image"},
+        "spec": {"modelName": "x", "modelHub": "huggingface", "hubModelId": "org/x",
+                 "serving": {"image": "NOT VALID!!"}}}),
+    ("AgentIdP without a status", {
+        "apiVersion": "ai.agentbox.io/v1beta1", "kind": "AgentIdP",
+        "metadata": {"name": "bad-idp"},
+        "spec": {"identity": [{"type": "role", "roles": ["admin"]}]}}),
+    ("AIMetric base type without its required fields", {
+        "apiVersion": "ai.agentbox.io/v1beta1", "kind": "AIMetric",
+        "metadata": {"name": "bad-metric-base"},
+        "spec": {"type": "base", "metricName": "x"}}),
+    ("Guardrail with an unknown effect", {
+        "apiVersion": "ai.agentbox.io/v1beta1", "kind": "Guardrail",
+        "metadata": {"name": "bad-guardrail"},
+        "spec": {"name": "x", "status": "enforce", "priority": 1,
+                 "conditions": {"all": [{"metric": "m", "operator": "gt", "threshold": 1,
+                                         "statistic": "Average", "periodSeconds": 60}]},
+                 "effect": {"type": "detonate"}}}),
+    ("Tracer log record with an invalid severity", {
+        "apiVersion": "ai.agentbox.io/v1beta1", "kind": "Tracer",
+        "metadata": {"name": "bad-tracer"},
+        "spec": {"resource": {"attributes": []},
+                 "logRecords": [{"timeUnixNano": 1, "severityNumber": 99,
+                                 "severityText": "SHOUTING",
+                                 "body": {"type": "string", "stringValue": "x"}}]}}),
+    ("Recipe without stages", {
+        "apiVersion": "ai.agentbox.io/v1beta1", "kind": "Recipe",
+        "metadata": {"name": "bad-recipe"},
+        "spec": {"coreMetadata": {"description": "x", "type": "workflow", "version": "1.0.0",
+                                  "status": "active"},
+                 "executionDefinition": {"stages": []}}}),
+    ("HarnessSwarmAutoScaler pointed at a Model", {
+        "apiVersion": "ai.agentbox.io/v1beta1", "kind": "HarnessSwarmAutoScaler",
+        "metadata": {"name": "bad-swarm-target"},
+        "spec": {"scaleTargetRef": {"kind": "Model", "name": "x"},
+                 "bounds": {"maxReplicas": 4},
+                 "metrics": [{"type": "aiMetric", "metric": "m",
+                              "target": {"metricType": "averageValue", "value": 5}}]}}),
+    ("ToolServerAutoScaler pointed at a HarnessRuntime", {
+        "apiVersion": "ai.agentbox.io/v1beta1", "kind": "ToolServerAutoScaler",
+        "metadata": {"name": "bad-ts-target"},
+        "spec": {"scaleTargetRef": {"kind": "HarnessRuntime", "name": "x"},
+                 "bounds": {"maxReplicas": 4},
+                 "metrics": [{"type": "aiMetric", "metric": "m",
+                              "target": {"metricType": "averageValue", "value": 5}}]}}),
 ]
 
 
@@ -693,6 +749,337 @@ def test_controller_idempotent(context, namespace, kubeconfig):
                   f"{first} then {second}")
 
 
+
+def test_controller_serving_paths(context, namespace, kubeconfig):
+    """Model and Gateway run in-cluster when spec.serving is set."""
+    ok = True
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Model",
+           "metadata": {"name": "served-model"},
+           "spec": {"modelName": "served", "modelHub": "huggingface",
+                    "hubModelId": "org/served", "replicas": 1,
+                    "serving": {"image": "busybox:1.36", "port": 8000,
+                                "nodeSelector": {"agentbox.io/gpu": "true"},
+                                "compute": {"cpu": {"cores": 1, "memoryMb": 128}}}}},
+          context, namespace)
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Gateway",
+           "metadata": {"name": "served-gateway"},
+           "spec": {"modelName": "served", "replicas": 1,
+                    "litellmParams": {"model": "openai/served", "apiBase": "http://x/v1"},
+                    "modelInfo": {"id": "served", "mode": "chat"},
+                    "serving": {"image": "busybox:1.36", "port": 4000}}},
+          context, namespace)
+    _run_controller(kubeconfig, namespace)
+
+    for resource, name, owner in [("deployment", "served-model", "Model"),
+                                  ("service", "served-model", "Model"),
+                                  ("deployment", "served-gateway", "Gateway"),
+                                  ("service", "served-gateway", "Gateway")]:
+        code, out, err = kubectl("get", resource, name, "-n", namespace, "-o", "json",
+                                 context=context, check=False)
+        owned = code == 0 and any(r["kind"] == owner
+                                  for r in json.loads(out)["metadata"].get("ownerReferences", []))
+        ok &= record(f"serving {resource}/{name} owned by {owner}",
+                     PASS if owned else FAIL, err.strip()[:140])
+
+    _, out, _ = kubectl("get", "deployment", "served-model", "-n", namespace,
+                        "-o", "jsonpath={.spec.template.spec.nodeSelector}", context=context)
+    ok &= record("Model serving honours nodeSelector for GPU placement",
+                 PASS if "agentbox.io/gpu" in out else FAIL, out)
+
+    address = _status_of(context, namespace, "models", "served-model").get("address")
+    ok &= record("Model reports its serving address",
+                 PASS if address == f"served-model.{namespace}.svc:8000" else FAIL, str(address))
+
+    registry = _status_of(context, namespace, "models", "llama-3-70b-instruct")
+    ok &= record("a Model without serving stays a registry entry",
+                 PASS if registry.get("state") == "active" and "address" not in registry
+                 else FAIL, json.dumps(registry)[:160])
+    return ok
+
+
+def test_controller_workload_shapes(context, namespace, kubeconfig):
+    """runtimeKind and execution.schedule pick the right workload."""
+    ok = True
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "HarnessRuntime",
+           "metadata": {"name": "batch-harness"},
+           "spec": {"runtimeKind": "batch", "code": {"image": "busybox:1.36", "args": ["true"]}}},
+          context, namespace)
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "HarnessRuntime",
+           "metadata": {"name": "cron-harness"},
+           "spec": {"runtimeKind": "cron", "code": {"image": "busybox:1.36"},
+                    "schedule": {"cronExpression": "0 4 * * *", "timezone": "UTC"}}},
+          context, namespace)
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "TrainLoop",
+           "metadata": {"name": "oneshot-loop"},
+           "spec": {"type": "training", "version": "1.0.0", "status": "active",
+                    "worker": {"image": "busybox:1.36", "args": ["true"]},
+                    "execution": {"mode": "continuous", "timeoutSeconds": 60}}},
+          context, namespace)
+    _run_controller(kubeconfig, namespace)
+
+    for resource, name, label in [("job", "batch-harness", "batch harness -> Job"),
+                                  ("cronjob", "cron-harness", "cron harness -> CronJob"),
+                                  ("job", "oneshot-loop", "unscheduled TrainLoop -> Job")]:
+        code, _, err = kubectl("get", resource, name, "-n", namespace,
+                               context=context, check=False)
+        ok &= record(label, PASS if code == 0 else FAIL, err.strip()[:140])
+
+    _, out, _ = kubectl("get", "cronjob", "cron-harness", "-n", namespace,
+                        "-o", "jsonpath={.spec.schedule}", context=context)
+    ok &= record("cron harness carries the declared schedule",
+                 PASS if out.strip() == "0 4 * * *" else FAIL, out)
+
+    code, _, _ = kubectl("get", "deployment", "batch-harness", "-n", namespace,
+                         context=context, check=False)
+    ok &= record("a batch harness gets no Deployment", PASS if code != 0 else FAIL)
+    return ok
+
+
+def test_controller_evaluator_run(context, namespace, kubeconfig):
+    """Annotating an Evaluator with a run id starts exactly one Job."""
+    ok = True
+    kubectl("patch", "evaluators", "summarization-accuracy", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"runConfig": {"image": "busybox:1.36"}}}), context=context)
+    kubectl("annotate", "evaluators", "summarization-accuracy", "-n", namespace,
+            "agentbox.io/run=run7", "--overwrite", context=context)
+    _run_controller(kubeconfig, namespace)
+
+    code, _, err = kubectl("get", "job", "summarization-accuracy-run7", "-n", namespace,
+                           context=context, check=False)
+    ok &= record("Evaluator run annotation starts a Job",
+                 PASS if code == 0 else FAIL, err.strip()[:140])
+
+    evaluator = _status_of(context, namespace, "evaluators", "summarization-accuracy")
+    ok &= record("Evaluator records the run id",
+                 PASS if evaluator.get("lastRunId") == "run7" else FAIL,
+                 json.dumps(evaluator)[:160])
+
+    _run_controller(kubeconfig, namespace)
+    _, out, _ = kubectl("get", "jobs", "-n", namespace, "-l",
+                        "agentbox.io/resource-group=evaluator", "-o", "json", context=context)
+    count = len(json.loads(out)["items"])
+    ok &= record("the same run id does not start a second Job",
+                 PASS if count == 1 else FAIL, f"{count} jobs")
+    return ok
+
+
+def test_controller_scaling_edges(context, namespace, kubeconfig):
+    """Scale-to-zero, stabilization windows and the third autoscaler."""
+    ok = True
+
+    # ToolServerAutoScaler: 200 calls/replica against a target of 50 is 4x
+    kubectl("patch", "toolservers", "summarize-text", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"replicas": 2}}), context=context)
+    _pin_metrics(context, namespace, {"tool-call-rate": 200})
+    _run_controller(kubeconfig, namespace)
+    ok &= record("tool server autoscaler scales 2 -> 8",
+                 PASS if _spec_replicas(context, namespace, "toolservers", "summarize-text") == 8
+                 else FAIL, str(_spec_replicas(context, namespace, "toolservers", "summarize-text")))
+
+    # scale-to-zero: the swarm autoscaler allows a floor of 0
+    kubectl("patch", "harnessruntimes", "api-harness", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"replicas": 4}}), context=context)
+    kubectl("patch", "harnessswarmautoscalers", "api-harness-swarm", "-n", namespace,
+            "--type=merge", "-p", json.dumps({"status": {"lastScaleTime": None}}),
+            "--subresource=status", context=context, check=False)
+    _pin_metrics(context, namespace, {"pending-agent-sessions": 0})
+    _run_controller(kubeconfig, namespace)
+    replicas = _spec_replicas(context, namespace, "harnessruntimes", "api-harness")
+    ok &= record("scale-to-zero takes the harness to 0",
+                 PASS if replicas == 0 else FAIL, f"replicas={replicas}")
+
+    # demand returns, but the scale-up stabilization window still applies at zero
+    _pin_metrics(context, namespace, {"pending-agent-sessions": 3})
+    _run_controller(kubeconfig, namespace)
+    held = _spec_replicas(context, namespace, "harnessruntimes", "api-harness")
+    swarm = _status_of(context, namespace, "harnessswarmautoscalers", "api-harness-swarm")
+    ok &= record("the stabilization window also holds a scale up from zero",
+                 PASS if held == 0 and "stabilization" in swarm.get("message", "")
+                 else FAIL, f"replicas={held}: {swarm.get('message')}")
+
+    # once the window passes, demand wakes it
+    kubectl("patch", "harnessswarmautoscalers", "api-harness-swarm", "-n", namespace,
+            "--type=merge", "-p", json.dumps({"spec": {"behavior": {
+                "scaleUp": {"stabilizationWindowSeconds": 0}}}}), context=context)
+    _run_controller(kubeconfig, namespace)
+    woken = _spec_replicas(context, namespace, "harnessruntimes", "api-harness")
+    ok &= record("demand at zero replicas wakes the harness back up",
+                 PASS if woken == 1 else FAIL, f"replicas={woken}")
+
+    # a stabilization window blocks the next move
+    kubectl("patch", "modelautoscalers", "llama-3-70b-autoscaler", "-n", namespace,
+            "--type=merge", "-p", json.dumps({"spec": {"behavior": {
+                "scaleUp": {"stabilizationWindowSeconds": 3600}}}}), context=context)
+    kubectl("patch", "models", "llama-3-70b-instruct", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"replicas": 1}}), context=context)
+    _pin_metrics(context, namespace, {"inference-queue-depth": 200})
+    _run_controller(kubeconfig, namespace)   # scales, stamping lastScaleTime
+    before = _spec_replicas(context, namespace, "models", "llama-3-70b-instruct")
+    kubectl("patch", "models", "llama-3-70b-instruct", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"replicas": 1}}), context=context)
+    _run_controller(kubeconfig, namespace)   # blocked by the window
+    after = _spec_replicas(context, namespace, "models", "llama-3-70b-instruct")
+    autoscaler = _status_of(context, namespace, "modelautoscalers", "llama-3-70b-autoscaler")
+    ok &= record("stabilization window blocks the next scale",
+                 PASS if after == 1 and "stabilization" in autoscaler.get("message", "")
+                 else FAIL, f"{before} -> {after}: {autoscaler.get('message')}")
+
+    ok &= record("autoscaler reports a missing target",
+                 PASS if _autoscaler_missing_target(context, namespace, kubeconfig) else FAIL)
+    return ok
+
+
+def _autoscaler_missing_target(context, namespace, kubeconfig):
+    """An autoscaler whose target does not exist reports degraded, not crashed."""
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "ToolServerAutoScaler",
+           "metadata": {"name": "orphan-autoscaler"},
+           "spec": {"scaleTargetRef": {"kind": "ToolServer", "name": "does-not-exist"},
+                    "bounds": {"maxReplicas": 4},
+                    "metrics": [{"type": "aiMetric", "metric": "tool-call-rate",
+                                 "target": {"metricType": "averageValue", "value": 50}}]}},
+          context, namespace)
+    _run_controller(kubeconfig, namespace)
+    result = _status_of(context, namespace, "toolserverautoscalers", "orphan-autoscaler")
+    return result.get("state") == "degraded"
+
+
+def test_controller_suspended_paths(context, namespace, kubeconfig):
+    """enabled:false, paused and disabled are honoured, not ignored."""
+    ok = True
+    kubectl("patch", "toolservers", "summarize-text", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"enabled": False}}), context=context)
+    kubectl("patch", "trainloops", "sft-nightly", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"status": "paused"}}), context=context)
+    kubectl("patch", "modelautoscalers", "llama-3-70b-autoscaler", "-n", namespace,
+            "--type=merge", "-p", json.dumps({"spec": {"enabled": False}}), context=context)
+    kubectl("patch", "aimetrics", "request-latency", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"status": "inactive"}}), context=context)
+    kubectl("patch", "guardrails", "throttle-high-rps", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"status": "disabled"}}), context=context)
+    _run_controller(kubeconfig, namespace)
+
+    for plural, name, expected in [("toolservers", "summarize-text", "suspended"),
+                                   ("trainloops", "sft-nightly", "suspended"),
+                                   ("modelautoscalers", "llama-3-70b-autoscaler", "suspended"),
+                                   ("aimetrics", "request-latency", "inactive"),
+                                   ("guardrails", "throttle-high-rps", "inactive")]:
+        state = _status_of(context, namespace, plural, name).get("state")
+        ok &= record(f"{plural}/{name} reports {expected} when switched off",
+                     PASS if state == expected else FAIL, f"state={state}")
+
+    ok &= record("a disabled tool server has its Deployment removed",
+                 PASS if wait_gone("deployment", "summarize-text", context, namespace, 30)
+                 else FAIL)
+
+    # put it back
+    kubectl("patch", "toolservers", "summarize-text", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"enabled": True}}), context=context)
+    kubectl("patch", "guardrails", "throttle-high-rps", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"status": "enforce"}}), context=context)
+    return ok
+
+
+def test_controller_validation_paths(context, namespace, kubeconfig):
+    """Recipe graphs and AgentIdP permissions."""
+    ok = True
+
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Recipe",
+           "metadata": {"name": "cyclic-recipe"},
+           "spec": {"coreMetadata": {"description": "x", "type": "workflow",
+                                     "version": "1.0.0", "status": "active"},
+                    "executionDefinition": {"stages": [
+                        {"id": "a", "name": "A", "type": "ingest", "dependsOn": ["b"]},
+                        {"id": "b", "name": "B", "type": "transform", "dependsOn": ["a"]}]}}},
+          context, namespace)
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Recipe",
+           "metadata": {"name": "dangling-recipe"},
+           "spec": {"coreMetadata": {"description": "x", "type": "workflow",
+                                     "version": "1.0.0", "status": "active"},
+                    "executionDefinition": {"stages": [
+                        {"id": "a", "name": "A", "type": "ingest", "dependsOn": ["nowhere"]}]}}},
+          context, namespace)
+    _run_controller(kubeconfig, namespace)
+
+    cyclic = _status_of(context, namespace, "recipes", "cyclic-recipe")
+    ok &= record("Recipe rejects a dependency cycle",
+                 PASS if cyclic.get("state") == "failed" and "cycle" in cyclic.get("message", "")
+                 else FAIL, json.dumps(cyclic)[:160])
+
+    dangling = _status_of(context, namespace, "recipes", "dangling-recipe")
+    ok &= record("Recipe rejects an unknown dependency",
+                 PASS if dangling.get("state") == "failed"
+                 and "unknown" in dangling.get("message", "") else FAIL,
+                 json.dumps(dangling)[:160])
+
+    _, out, _ = kubectl("get", "role", "default-idp", "-n", namespace, "-o", "json",
+                        context=context)
+    verbs = set(json.loads(out)["rules"][0]["verbs"])
+    ok &= record("a deny-by-default AgentIdP grants read-only access",
+                 PASS if verbs == {"get", "list", "watch"} else FAIL, str(sorted(verbs)))
+
+    kubectl("patch", "agentidps", "default-idp", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"defaultBehavior": "allow"}}), context=context)
+    _run_controller(kubeconfig, namespace)
+    _, out, _ = kubectl("get", "role", "default-idp", "-n", namespace, "-o", "json",
+                        context=context)
+    verbs = set(json.loads(out)["rules"][0]["verbs"])
+    ok &= record("an allow-by-default AgentIdP grants writes",
+                 PASS if "create" in verbs and "patch" in verbs else FAIL, str(sorted(verbs)))
+    return ok
+
+
+def test_controller_remaining_status(context, namespace, kubeconfig):
+    """The kinds whose status is only exercised by behaviour tests."""
+    _pin_metrics(context, namespace, {"gateway-tokens": 1_000_000, "request-rate": 1500,
+                                      "request-latency": 42})
+    kubectl("patch", "aimetrics", "request-latency", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"status": "active"}}), context=context)
+    _run_controller(kubeconfig, namespace)
+
+    ok = True
+    for plural, name, fields in [
+        ("models", "llama-3-70b-instruct", ["hubModelId"]),
+        ("trainloops", "sft-nightly", ["schedule"]),
+        ("aimeters", "tenant-token-spend", ["currentUsage", "unit", "window"]),
+        ("guardrails", "throttle-high-rps", ["triggered", "observations"]),
+        ("modelautoscalers", "llama-3-70b-autoscaler", ["currentReplicas", "metrics"]),
+        ("harnessswarmautoscalers", "api-harness-swarm", ["currentReplicas", "metrics"]),
+        ("toolserverautoscalers", "summarize-text-autoscaler", ["currentReplicas", "metrics"]),
+    ]:
+        if plural == "trainloops":
+            kubectl("patch", plural, name, "-n", namespace, "--type=merge",
+                    "-p", json.dumps({"spec": {"status": "active"}}), context=context)
+            _run_controller(kubeconfig, namespace)
+        block = _status_of(context, namespace, plural, name)
+        missing = [f for f in fields if f not in block]
+        ok &= record(f"status of {plural}/{name}",
+                     PASS if not missing and block.get("conditions") else FAIL,
+                     f"missing {missing} in {json.dumps(block)[:140]}")
+
+    metric = _status_of(context, namespace, "aimetrics", "request-latency")
+    ok &= record("AIMetric reports the observed value",
+                 PASS if metric.get("currentValue") == 42 else FAIL, json.dumps(metric)[:160])
+    return ok
+
+
+def test_metric_source_prometheus(context, namespace, kubeconfig):
+    """The Prometheus backend is used when configured, and falls back when not."""
+    sys.path.insert(0, str(ROOT))
+    from controller.context import Context
+    from controller.metrics import MetricSource
+
+    _pin_metrics(context, namespace, {"fallback-metric": 7})
+
+    ctx = Context(kubeconfig=kubeconfig, namespace=namespace,
+                  prometheus_url="http://127.0.0.1:1")  # nothing listening
+    source = MetricSource(ctx)
+    ok = record("an unreachable Prometheus falls back to the ConfigMap",
+                PASS if source.value("fallback-metric", namespace) == 7 else FAIL)
+    ok &= record("an unknown metric reports no value",
+                 PASS if source.value("no-such-metric", namespace) is None else FAIL)
+    return ok
+
+
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
@@ -741,6 +1128,22 @@ def main():
         ("controller scaling", test_controller_scaling,
          (args.context, args.namespace, args.kubeconfig)),
         ("controller metering", test_controller_metering_and_guardrails,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller serving", test_controller_serving_paths,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller workload shapes", test_controller_workload_shapes,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller evaluator runs", test_controller_evaluator_run,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller scaling edges", test_controller_scaling_edges,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller suspended paths", test_controller_suspended_paths,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller validation paths", test_controller_validation_paths,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller remaining status", test_controller_remaining_status,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("metric source", test_metric_source_prometheus,
          (args.context, args.namespace, args.kubeconfig)),
         ("controller idempotence", test_controller_idempotent,
          (args.context, args.namespace, args.kubeconfig)),

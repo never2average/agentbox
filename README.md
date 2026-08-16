@@ -235,7 +235,7 @@ Honest state of the world, so nobody is surprised:
 | ✅ | **Autoscaling that works**, on the HorizontalPodAutoscaler formula with a tolerance band, stabilization windows and scale-to-zero |
 | ✅ | **Metering that computes** — flat, per-unit and tiered pricing, budget thresholds, breach events |
 | ✅ | **Python CRUD layer** for every kind, for clusters where you cannot install CRDs |
-| ✅ | **Verified end to end** against a live API server — 122 assertions ([`tests/e2e_test.py`](tests/e2e_test.py)) |
+| ✅ | **Verified end to end** against a live API server — 173 assertions ([`tests/e2e_test.py`](tests/e2e_test.py)) |
 | 🚧 | **No admission webhook.** Validation happens at the API server via the CRD schemas and CEL rules, not through defaulting/mutating webhooks |
 | 🚧 | **Guardrail effects are reported, not enforced.** The controller decides whether a guardrail trips and says so in status and events; the gateway or harness still has to act on it |
 | 🚧 | **The controller is single-replica.** No leader election yet, so do not run two |

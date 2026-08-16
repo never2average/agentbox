@@ -49,7 +49,14 @@ def _desired_for_metric(metric: Dict[str, Any], current: int, observed: float,
         return None
 
     kind = target.get("metricType", "averageValue")
-    base = max(current, 1)
+
+    # Activation: at zero replicas there is no per-replica average to reason
+    # about, so any demand at all brings one replica back. Scaling proper
+    # resumes from there.
+    if current == 0:
+        return 1 if observed > 0 else 0
+
+    base = current
 
     if kind == "value":
         # observed is a total and the target is what one replica handles
@@ -61,7 +68,9 @@ def _desired_for_metric(metric: Dict[str, Any], current: int, observed: float,
     if abs(ratio - 1.0) <= tolerance:
         return current
 
-    return max(1, int(-(-(base * ratio) // 1)))
+    # No floor here: bounds decide whether zero is allowed, and a floor of 1 at
+    # this level would make scaleToZero unreachable.
+    return max(0, int(-(-(base * ratio) // 1)))
 
 
 def _observe(source: MetricSource, metric: Dict[str, Any], namespace: str,
