@@ -25,6 +25,30 @@ IMAGE_REPO = "ghcr.io/never2average/agentbox-controller"
 DEFAULT_VERSION = "latest"
 
 
+# kubectl applies a multi-document file in order, so the file has to be ordered:
+# a namespaced object cannot be created before its namespace, and a binding
+# cannot reference a ServiceAccount that does not exist yet.
+APPLY_ORDER = [
+    "Namespace",
+    "CustomResourceDefinition",
+    "ServiceAccount",
+    "ClusterRole",
+    "Role",
+    "ClusterRoleBinding",
+    "RoleBinding",
+    "ConfigMap",
+    "Secret",
+    "Service",
+    "Deployment",
+]
+
+
+def apply_rank(doc):
+    """Position of a document in a safe apply order."""
+    kind = doc.get("kind", "")
+    return APPLY_ORDER.index(kind) if kind in APPLY_ORDER else len(APPLY_ORDER)
+
+
 def documents(directory: Path):
     """Every YAML document in a directory, skipping kustomization files."""
     for path in sorted(directory.glob("*.yaml")):
@@ -60,8 +84,11 @@ def build(version):
         "# controller, and the controller itself.\n"
     )
 
+    everything = list(documents(CRD_DIR)) + list(documents(DEPLOY_DIR))
+    everything.sort(key=lambda pair: apply_rank(pair[1]))
+
     chunks = [header]
-    for source, doc in list(documents(CRD_DIR)) + list(documents(DEPLOY_DIR)):
+    for source, doc in everything:
         doc = pin_image(doc, version)
         chunks.append(f"---\n# from {source}\n" +
                       yaml.dump(doc, default_flow_style=False, sort_keys=False, width=100))

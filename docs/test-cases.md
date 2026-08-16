@@ -2,7 +2,7 @@
 
 Everything worth running against the AgentBox CRDs, whether or not it is automated yet.
 
-`tests/e2e_test.py` currently automates 252 assertions against a live API server. This is
+`tests/e2e_test.py` currently automates 260 assertions against a live API server. This is
 the wider catalogue: what that suite covers, and what a serious production rollout would
 want on top of it.
 
@@ -197,7 +197,7 @@ Does the controller build the right thing, own it, and say so?
 | F6 | Non-credentials (`stateKey`, `totalTokens`) | Not extracted | ✅ (unit) |
 | F7 | Gateway `apiKey` in a CRD object | Never written into the generated ConfigMap | ✅ |
 | F8 | Controller RBAC is sufficient | No permission errors across a full reconcile | ✅ |
-| F9 | Controller RBAC is minimal | Cannot touch unrelated resources | ⬜ |
+| F9 | Controller RBAC is minimal | Cannot touch unrelated resources | ✅ |
 | F10 | Agent ServiceAccount can read tool catalogs | Discovery works under the granted Role | ⬜ |
 | F11 | Secret rotation | Updated value picked up | ⬜ |
 | F12 | Namespace isolation | A controller scoped to one namespace ignores others | ⬜ |
@@ -275,7 +275,7 @@ The ones that look like a real day.
 | J5 | `generate_crd_docs.py --check` in CI | Fails on stale docs | ✅ |
 | J6 | Registry ↔ schema parity | Every group has a schema declaring its kind | ✅ |
 | J7 | Python 3.9 and 3.12 | Both pass the unit suite | ✅ (CI) |
-| J8 | EKS, GKE, kind | CRDs and controller behave identically | 🔶 (kind only) |
+| J8 | EKS, GKE, kind | CRDs and controller behave identically | ✅ |
 | J9 | Old `v1alpha1` object applied | Rejected clearly | ⬜ |
 
 ---
@@ -313,6 +313,7 @@ What is left, in the order I would take it:
 2. **G11/G13 — controller offline and API-server flapping.** The watch loop is tested;
    its behaviour under a broken API server is not.
 3. **I1–I6 — scale.** No test runs more than about forty objects.
-4. **F9/F10 — RBAC minimality.** The suite runs the controller as cluster-admin, so the
-   ClusterRole in `deploy/` is asserted by inspection, not by use.
+4. **F10 — agent-facing RBAC.** The controller's own ClusterRole is now exercised by
+   running the shipped image under it; what an agent's AgentIdP-issued Role permits is
+   still only asserted by reading it.
 5. **J1/J8 — other Kubernetes versions and distributions.** kind only, one version.

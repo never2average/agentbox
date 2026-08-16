@@ -64,13 +64,20 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Build the controller image and load it into the cluster
+        run: |
+          docker build -t ghcr.io/never2average/agentbox-controller:latest .
+          kind load docker-image ghcr.io/never2average/agentbox-controller:latest \
+            --name chart-testing
       - name: End-to-end suite
         run: |
           python tests/e2e_test.py \
-            --context kind-kind \
-            --kubeconfig "$HOME/.kube/config"
-      - name: Dump the demo namespace on failure
+            --context kind-chart-testing \
+            --kubeconfig "$HOME/.kube/config" \
+            --image ghcr.io/never2average/agentbox-controller:latest
+      - name: Dump state on failure
         if: failure()
         run: |
           kubectl get pods -A || true
           kubectl -n agentbox-demo-e2e describe pods || true
+          kubectl -n agentbox-system logs deploy/agentbox-controller --tail=100 || true

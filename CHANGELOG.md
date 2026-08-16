@@ -67,8 +67,15 @@ helm install agentbox oci://ghcr.io/never2average/charts/agentbox \
 - `k8s_modules/` — a Python CRUD layer for clusters where CRDs cannot be installed
 - `charts/agentbox` — a Helm chart, for teams that install nothing else
 - `ai-ctl agentbox status` — one view of the fleet across namespaces
-- `tests/e2e_test.py` — 252 assertions against a live API server
+- `tests/e2e_test.py` — 260 assertions against a live API server
 - `docs/test-cases.md` — 186 catalogued cases, marked automated or not
+
+### Verified as shipped
+
+The end-to-end suite installs `install.yaml`, runs the published controller image with only
+the ClusterRole it ships with, and drives a real request through it — then kills the leader
+and checks the standby takes over and keeps reconciling. What is tested is the artifact,
+not just the logic.
 
 ### Known limitations
 

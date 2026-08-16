@@ -1867,6 +1867,127 @@ def test_credentials_by_reference(context, namespace, kubeconfig):
     return ok
 
 
+
+# -------------------------------------------------------------------------- 12
+def test_shipped_install(context, namespace, kubeconfig, image):
+    """
+    The artifact people actually install: install.yaml, the controller image, and
+    the ClusterRole it ships with. Everything else in this suite runs the
+    reconciler in-process as whoever is holding the kubeconfig, which proves the
+    logic but not the packaging.
+    """
+    ok = True
+    live_ns = "agentbox-live-e2e"
+
+    # This stage runs real pods on the same node every earlier stage has been
+    # filling. Release the workloads they left behind; their CRs stay, so --keep
+    # still leaves something to inspect.
+    for resource in ("deployments", "jobs", "cronjobs"):
+        kubectl("delete", resource, "--all", "-n", namespace, "--wait=false",
+                context=context, check=False)
+    _wait_for(lambda: not kubectl("get", "pods", "-n", namespace,
+                                  "--no-headers", context=context,
+                                  check=False)[1].strip(), timeout=120, interval=5)
+
+    kubectl("create", "namespace", live_ns, context=context, check=False)
+
+    code, out, err = kubectl("apply", "-f", str(ROOT / "install.yaml"),
+                             context=context, check=False)
+    ok &= record("install.yaml applies in one pass",
+                 PASS if code == 0 else FAIL, err.strip()[-300:])
+    if code != 0:
+        return ok
+
+    # Scope it to its own namespace so it cannot race the in-process controller
+    # the rest of this suite drives.
+    kubectl("patch", "deployment", "agentbox-controller", "-n", "agentbox-system",
+            "--type=json", "-p", json.dumps([{
+                "op": "add",
+                "path": "/spec/template/spec/containers/0/args/-",
+                "value": f"--namespace={live_ns}"}]),
+            context=context, check=False)
+
+    code, _, err = kubectl("rollout", "status", "deploy/agentbox-controller",
+                           "-n", "agentbox-system", "--timeout=240s",
+                           context=context, check=False)
+    ok &= record("the shipped controller image starts",
+                 PASS if code == 0 else FAIL, err.strip()[-300:])
+    if code != 0:
+        _, pods, _ = kubectl("get", "pods", "-n", "agentbox-system", "-o", "wide",
+                             context=context, check=False)
+        record("controller pods", FAIL, pods)
+        return ok
+
+    leader = _wait_for(
+        lambda: kubectl("get", "lease", "agentbox-controller", "-n", "agentbox-system",
+                        "-o", "jsonpath={.spec.holderIdentity}",
+                        context=context, check=False)[1].strip() or None,
+        timeout=90)
+    ok &= record("one replica takes the lease", PASS if leader else FAIL,
+                 "no lease holder within 90s")
+
+    # the whole loop, driven only by the in-cluster controller
+    manifest = (ROOT / "examples" / "demo.yaml").read_text().replace(
+        "agentbox-demo.svc", f"{live_ns}.svc")
+    kubectl("apply", "-n", live_ns, "-f", "-", context=context, input_text=manifest)
+
+    ready = _wait_for(
+        lambda: all(
+            kubectl("get", "deployment", name, "-n", live_ns,
+                    "-o", "jsonpath={.status.readyReplicas}",
+                    context=context, check=False)[1].strip() == "1"
+            for name in ("demo-small", "demo-gateway", "demo-tools")),
+        timeout=420)
+    ok &= record("the in-cluster controller builds the demo workloads",
+                 PASS if ready else FAIL, "not ready within 420s")
+
+    if ready:
+        succeeded = _wait_for(
+            lambda: kubectl("get", "job", "demo-agent", "-n", live_ns,
+                            "-o", "jsonpath={.status.succeeded}",
+                            context=context, check=False)[1].strip() == "1",
+            timeout=300)
+        _, logs, _ = kubectl("logs", "job/demo-agent", "-n", live_ns,
+                             context=context, check=False)
+        ok &= record("a real request succeeds under the shipped RBAC",
+                     PASS if succeeded and "RESULT ok:" in logs else FAIL, logs[-300:])
+
+    _, denials, _ = kubectl("logs", "deploy/agentbox-controller", "-n", "agentbox-system",
+                            "--tail=400", context=context, check=False)
+    forbidden = [line for line in denials.splitlines()
+                 if "Forbidden" in line or "forbidden" in line]
+    ok &= record("the shipped ClusterRole grants everything the controller needs",
+                 PASS if not forbidden else FAIL, "\n".join(forbidden[:3]))
+
+    # failover: the standby must take over
+    if leader:
+        kubectl("delete", "pod", leader, "-n", "agentbox-system", "--wait=false",
+                context=context, check=False)
+        new_leader = _wait_for(
+            lambda: (kubectl("get", "lease", "agentbox-controller", "-n", "agentbox-system",
+                             "-o", "jsonpath={.spec.holderIdentity}",
+                             context=context, check=False)[1].strip() or None)
+            not in (None, leader),
+            timeout=120)
+        ok &= record("the standby takes over when the leader dies",
+                     PASS if new_leader else FAIL, "no handover within 120s")
+
+        # and the new leader still does the work
+        kubectl("delete", "job", "demo-agent", "-n", live_ns, context=context, check=False)
+        recovered = _wait_for(
+            lambda: kubectl("get", "job", "demo-agent", "-n", live_ns,
+                            "-o", "jsonpath={.status.succeeded}",
+                            context=context, check=False)[1].strip() == "1",
+            timeout=300)
+        ok &= record("the new leader keeps reconciling",
+                     PASS if recovered else FAIL, "the job did not run again")
+
+    kubectl("delete", "namespace", live_ns, "--wait=false", context=context, check=False)
+    kubectl("delete", "-f", str(ROOT / "install.yaml"), "--wait=false",
+            context=context, check=False)
+    return ok
+
+
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
@@ -1879,6 +2000,9 @@ def main():
     parser.add_argument("--skip-demo", action="store_true",
                         help="skip examples/demo.yaml, which pulls real images")
     parser.add_argument("--only", help="run only stages whose label contains this string")
+    parser.add_argument("--image",
+                        help="controller image already present in the cluster; enables the "
+                             "shipped-install stage")
     args = parser.parse_args()
 
     if not args.kubeconfig:
@@ -1976,6 +2100,10 @@ def main():
         ("controller idempotence", test_controller_idempotent,
          (args.context, args.namespace, args.kubeconfig)),
     ]
+
+    if args.image:
+        stages.append(("shipped install: image, RBAC and failover", test_shipped_install,
+                       (args.context, args.namespace, args.kubeconfig, args.image)))
 
     if args.only:
         stages = [s for s in stages if args.only in s[0]]
