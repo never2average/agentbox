@@ -6,7 +6,7 @@ Sixteen CRDs that give a platform engineer the same grip on models, agents, tool
 spend that they already have on Deployments, Services and Postgres.
 
 ```bash
-kubectl apply -k crds/
+kubectl apply -f https://github.com/never2average/agentbox/releases/latest/download/install.yaml
 kubectl get harnessruntimes -A
 ```
 
@@ -164,10 +164,30 @@ written back to status.
 ## Quickstart
 
 ```bash
-pip install -r requirements.txt
-kubectl apply -k crds/     # the 16 CRDs
-kubectl apply -k deploy/   # the controller that reconciles them
+# the 16 CRDs and the controller
+kubectl apply -f https://github.com/never2average/agentbox/releases/latest/download/install.yaml
+
+# or from a clone
+kubectl apply -k crds/ && kubectl apply -k deploy/
 ```
+
+See it work end to end — a real agent, gateway, model and tool server, no
+registry required:
+
+```bash
+kubectl create namespace agentbox-demo
+kubectl apply -n agentbox-demo -f examples/demo.yaml
+kubectl -n agentbox-demo logs job/demo-agent -f
+```
+
+```
+discovered tool: summarize at http://demo-tools.agentbox-demo.svc:8080/summarize
+tool responded 200: {"summary": "the quick brown fox jumps", "wordCount": 9}
+RESULT ok: answered: summarise: the quick brown fox jumps
+```
+
+Then spend the budget and watch the same agent get refused, without its image
+changing — [examples/README.md](examples/README.md).
 
 Declare a gateway to a provider, then run an agent image against it:
 
@@ -237,9 +257,10 @@ Honest state of the world, so nobody is surprised:
 | ✅ | **Autoscaling that works**, on the HorizontalPodAutoscaler formula with a tolerance band, stabilization windows and scale-to-zero |
 | ✅ | **Metering that computes** — flat, per-unit and tiered pricing, budget thresholds, breach events |
 | ✅ | **Python CRUD layer** for every kind, for clusters where you cannot install CRDs |
-| ✅ | **Verified end to end** against a live API server — 233 assertions ([`tests/e2e_test.py`](tests/e2e_test.py)) |
+| ✅ | **Enforcement reaches the data plane.** A tripped Guardrail or a spent budget lands in the Gateway's config, and the gateway refuses traffic |
+| ✅ | **Verified end to end** against a live API server, including a real request through a real gateway to a real model ([`tests/e2e_test.py`](tests/e2e_test.py)) |
 | 🚧 | **No admission webhook.** Validation happens at the API server via the CRD schemas and CEL rules, not through defaulting/mutating webhooks |
-| 🚧 | **Guardrail effects are reported, not enforced.** The controller decides whether a guardrail trips and says so in status and events; the gateway or harness still has to act on it |
+| 🚧 | **The gateway does the enforcing.** The controller decides and publishes; a gateway that ignores the config it is given will not enforce anything |
 | ✅ | **Leader election**, so a second replica stands by rather than fighting the first |
 
 `v1beta1` is where the field names settle. I will not rename fields under you from here
@@ -267,6 +288,7 @@ The reasoning in full: **[docs/design.md](docs/design.md)**.
 
 ```
 schemas/       JSON Schema source of truth, one file per CRD + common definitions
+examples/      A runnable demo: agent, gateway, model, tool server
 crds/          Generated CustomResourceDefinition manifests (kubectl apply -k crds/)
 controller/    The reconciler: one function per kind, plus the watch loop
 deploy/        RBAC and Deployment for running the controller in-cluster
@@ -295,6 +317,7 @@ python tools/generate_crd_docs.py
 - [CLI integration](docs/cli-integration.md) — wiring the managers into `ai-ctl`
 - [Migration](docs/migration.md) — how the earlier schema set maps onto these CRDs
 - [Controller](docs/controller.md) — what each kind reconciles into, and how to run it
+- [Demo](examples/README.md) — a real request end to end, and a real refusal
 - [Test cases](docs/test-cases.md) — the full catalogue, and what is automated so far
 - [Contributing](CONTRIBUTING.md)
 

@@ -143,6 +143,7 @@ Runs a developer's agent image as a Kubernetes workload.
 | `endpoints` | array&lt;`endpoint`&gt; |  | Ports the harness serves on. A Service is created for these. |
 | `schedule` | `schedule` |  | Only meaningful when runtime_kind is cron. |
 | `health` | `health` |  | Readiness probe for the harness container. |
+| `files` | object |  | Files written into the container from a ConfigMap or Secret. The key is the mount path. |
 
 Enforced by the API server as CEL validation rules:
 
@@ -296,6 +297,7 @@ Runs an image that serves tools over HTTP or gRPC, and publishes their contracts
 | `stateManagement` | `stateManagement` |  | Whether tool calls carry state, and where that state lives. |
 | `permissions` | `permissions` |  | Scopes and roles required to call these tools. |
 | `monitoring` | `monitoring` |  | Logging and metric collection for tool calls. |
+| `files` | object |  | Files written into the container from a ConfigMap or Secret. The key is the mount path. |
 
 Enforced by the API server as CEL validation rules:
 

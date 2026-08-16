@@ -80,6 +80,30 @@
         "health": {
           "$ref": "#/definitions/health",
           "description": "Readiness probe for the harness container."
+        },
+        "files": {
+          "type": "object",
+          "description": "Files written into the container from a ConfigMap or Secret. The key is the mount path.",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "common-schema.json#/definitions/dnsName",
+                "description": "ConfigMap or Secret name in the same namespace."
+              },
+              "kind": {
+                "enum": [
+                  "ConfigMap",
+                  "Secret"
+                ],
+                "default": "ConfigMap"
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false,

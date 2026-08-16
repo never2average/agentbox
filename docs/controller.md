@@ -90,11 +90,32 @@ Autoscaling is deliberately *declarative all the way down*: the autoscaler patch
 target's `spec.replicas`, and the target's own reconciler moves the Deployment. You can
 always see the decision in the object rather than only in the workload.
 
+## How enforcement reaches the data plane
+
+The controller decides; the gateway acts. Every Gateway's generated config carries an
+`enforcement` list — the guardrails that have tripped and scope this gateway, plus the
+meters whose budget is spent with an `onExceed` other than `alert`:
+
+```json
+"enforcement": [
+  {"source": "demo-spend", "kind": "AIMeter", "effect": "throttle",
+   "message": "budget of 10 exceeded"}
+]
+```
+
+That config is mounted into the gateway's own pod at `/etc/agentbox/config.json`, so a
+gateway reads it without talking to the Kubernetes API. `spec.files` mounts any other
+ConfigMap or Secret the same way, into a harness, tool server or model.
+
+Reconcile order matters here: the kinds that *decide* — AIMetric, AIMeter, Guardrail — run
+before the kinds that *act*, so a breach reaches a gateway in the same pass rather than the
+next one.
+
 ## What it does not do
 
-- **Enforce guardrail effects.** It evaluates the conditions, records `triggered` and emits
-  a `GuardrailTripped` event. Throttling or blocking belongs to the gateway or the harness,
-  which is where the request actually is.
+- **Force a gateway to obey.** It publishes the verdict; a gateway that ignores its config
+  enforces nothing. The demo gateway in `examples/` shows the contract: read
+  `enforcement`, return 429.
 - **Move data.** A `Dataset` publishes its connector config; nothing in the controller reads
   from Kafka on your behalf.
 - **Enforce guardrail effects.** See above; the verdict is recorded, the action is not taken.

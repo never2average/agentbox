@@ -19,24 +19,32 @@ from controller.reconcilers import data, governance, scaling, workloads
 
 Reconciler = Callable[[Context, Dict[str, Any]], Dict[str, Any]]
 
-# CRD plural -> the function that reconciles it
+# CRD plural -> the function that reconciles it.
+#
+# Order matters within a pass. The kinds that decide something — what a metric
+# reads, whether a budget is spent, whether a guardrail has tripped — run before
+# the kinds that act on those decisions, so enforcement reaches a gateway in the
+# same pass rather than the next one.
 RECONCILERS: Dict[str, Reconciler] = {
-    "harnessruntimes": workloads.reconcile_harness_runtime,
-    "toolservers": workloads.reconcile_tool_server,
-    "models": workloads.reconcile_model,
-    "gateways": workloads.reconcile_gateway,
-    "trainloops": workloads.reconcile_train_loop,
-    "evaluators": workloads.reconcile_evaluator,
-    "modelautoscalers": scaling.reconcile_autoscaler,
-    "harnessswarmautoscalers": scaling.reconcile_autoscaler,
-    "toolserverautoscalers": scaling.reconcile_autoscaler,
-    "agentidps": governance.reconcile_agent_idp,
+    # decide
     "aimetrics": governance.reconcile_ai_metric,
     "aimeters": governance.reconcile_ai_meter,
     "guardrails": governance.reconcile_guardrail,
+    "agentidps": governance.reconcile_agent_idp,
     "tracers": governance.reconcile_tracer,
     "datasets": data.reconcile_dataset,
     "recipes": data.reconcile_recipe,
+    # act
+    "models": workloads.reconcile_model,
+    "gateways": workloads.reconcile_gateway,
+    "toolservers": workloads.reconcile_tool_server,
+    "harnessruntimes": workloads.reconcile_harness_runtime,
+    "trainloops": workloads.reconcile_train_loop,
+    "evaluators": workloads.reconcile_evaluator,
+    # scale, once the targets above have reported
+    "modelautoscalers": scaling.reconcile_autoscaler,
+    "harnessswarmautoscalers": scaling.reconcile_autoscaler,
+    "toolserverautoscalers": scaling.reconcile_autoscaler,
 }
 
 

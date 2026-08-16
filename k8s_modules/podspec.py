@@ -82,7 +82,8 @@ def container(
     ports: Optional[List[int]] = None,
     port_names: Optional[List[str]] = None,
     with_probe: bool = True,
-    code_key: str = 'code'
+    code_key: str = 'code',
+    volume_mounts: Optional[List[client.V1VolumeMount]] = None
 ) -> client.V1Container:
     """
     Build the container that runs an AgentBox workload.
@@ -126,6 +127,9 @@ def container(
             for n, p in zip(names, ports)
         ]
 
+    if volume_mounts:
+        result.volume_mounts = volume_mounts
+
     if with_probe:
         readiness = probe(spec.get('health', {}), ports[0] if ports else None)
         if readiness:
@@ -134,18 +138,47 @@ def container(
     return result
 
 
+def mounts(files: Dict[str, Any]):
+    """
+    Turn spec.files into volumes and volume mounts.
+
+    Args:
+        files: Mapping of mount path to {name, kind}
+
+    Returns:
+        (volumes, volume_mounts)
+    """
+    volumes, volume_mounts = [], []
+    for index, (path, source) in enumerate(sorted((files or {}).items())):
+        volume_name = f"files-{index}"
+        if source.get("kind") == "Secret":
+            volume = client.V1Volume(
+                name=volume_name,
+                secret=client.V1SecretVolumeSource(secret_name=source["name"]))
+        else:
+            volume = client.V1Volume(
+                name=volume_name,
+                config_map=client.V1ConfigMapVolumeSource(name=source["name"]))
+        volumes.append(volume)
+        volume_mounts.append(client.V1VolumeMount(name=volume_name, mount_path=path))
+    return volumes, volume_mounts
+
+
 def pod_template(name: str, containers: List[client.V1Container],
-                 restart_policy: Optional[str] = None) -> client.V1PodTemplateSpec:
+                 restart_policy: Optional[str] = None,
+                 volumes: Optional[List[client.V1Volume]] = None) -> client.V1PodTemplateSpec:
     """Build the pod template every AgentBox workload shares."""
     return client.V1PodTemplateSpec(
         metadata=client.V1ObjectMeta(labels={NAME_LABEL: name}),
-        spec=client.V1PodSpec(containers=containers, restart_policy=restart_policy)
+        spec=client.V1PodSpec(containers=containers, restart_policy=restart_policy,
+                              volumes=volumes or None)
     )
 
 
 def deployment(name: str, namespace: str, labels: Dict[str, str],
                replicas: int, containers: List[client.V1Container],
-               owner: Optional[client.V1OwnerReference] = None) -> client.V1Deployment:
+               owner: Optional[client.V1OwnerReference] = None,
+               volumes: Optional[List[client.V1Volume]] = None) -> client.V1Deployment:
     """Build a Deployment for a long-running AgentBox workload."""
     return client.V1Deployment(
         metadata=client.V1ObjectMeta(
@@ -155,7 +188,7 @@ def deployment(name: str, namespace: str, labels: Dict[str, str],
         spec=client.V1DeploymentSpec(
             replicas=replicas,
             selector=client.V1LabelSelector(match_labels={NAME_LABEL: name}),
-            template=pod_template(name, containers)
+            template=pod_template(name, containers, volumes=volumes)
         )
     )
 
@@ -179,7 +212,8 @@ def service(name: str, namespace: str, labels: Dict[str, str],
 
 def job(name: str, namespace: str, labels: Dict[str, str],
         containers: List[client.V1Container], backoff_limit: int = 3,
-        owner: Optional[client.V1OwnerReference] = None) -> client.V1Job:
+        owner: Optional[client.V1OwnerReference] = None,
+        volumes: Optional[List[client.V1Volume]] = None) -> client.V1Job:
     """Build a Job for a one-shot AgentBox workload."""
     return client.V1Job(
         metadata=client.V1ObjectMeta(
@@ -187,7 +221,8 @@ def job(name: str, namespace: str, labels: Dict[str, str],
             owner_references=[owner] if owner else None
         ),
         spec=client.V1JobSpec(
-            template=pod_template(name, containers, restart_policy='Never'),
+            template=pod_template(name, containers, restart_policy='Never',
+                                  volumes=volumes),
             backoff_limit=backoff_limit
         )
     )
@@ -196,7 +231,8 @@ def job(name: str, namespace: str, labels: Dict[str, str],
 def cronjob(name: str, namespace: str, labels: Dict[str, str],
             schedule: str, containers: List[client.V1Container],
             backoff_limit: int = 3,
-            owner: Optional[client.V1OwnerReference] = None) -> client.V1CronJob:
+            owner: Optional[client.V1OwnerReference] = None,
+            volumes: Optional[List[client.V1Volume]] = None) -> client.V1CronJob:
     """Build a CronJob for a scheduled AgentBox workload."""
     return client.V1CronJob(
         metadata=client.V1ObjectMeta(
@@ -207,7 +243,8 @@ def cronjob(name: str, namespace: str, labels: Dict[str, str],
             schedule=schedule,
             job_template=client.V1JobTemplateSpec(
                 spec=client.V1JobSpec(
-                    template=pod_template(name, containers, restart_policy='Never'),
+                    template=pod_template(name, containers, restart_policy='Never',
+                                          volumes=volumes),
                     backoff_limit=backoff_limit
                 )
             ),

@@ -2,7 +2,7 @@
 
 Everything worth running against the AgentBox CRDs, whether or not it is automated yet.
 
-`tests/e2e_test.py` currently automates 233 assertions against a live API server. This is
+`tests/e2e_test.py` currently automates 244 assertions against a live API server. This is
 the wider catalogue: what that suite covers, and what a serious production rollout would
 want on top of it.
 
@@ -234,10 +234,10 @@ The ones that look like a real day.
 
 | ID | Scenario | Expected | |
 |---|---|---|---|
-| H1 | **Ship an agent**: Gateway + HarnessRuntime + ToolServer, agent calls a tool through the Service | Traffic flows end to end | ⬜ |
-| H2 | **Traffic spike**: load raises the queue metric, swarm autoscaler scales, load drops, it scales back | Replicas track demand | 🔶 |
+| H1 | **Ship an agent**: Gateway + HarnessRuntime + ToolServer, agent calls a tool through the Service | Traffic flows end to end | ✅ |
+| H2 | **Traffic spike**: load raises the queue metric, swarm autoscaler scales, load drops, it scales back | Replicas track demand | ✅ |
 | H3 | **Idle overnight**: scale to zero, first request wakes it | Cold start works | ✅ (metric-driven) |
-| H4 | **Budget breach**: tokens accumulate past the limit, meter flags it, guardrail trips, gateway throttles | Chain fires end to end | 🔶 (throttle not enforced) |
+| H4 | **Budget breach**: tokens accumulate past the limit, meter flags it, guardrail trips, gateway throttles | Chain fires end to end | ✅ |
 | H5 | **Swap providers**: change Gateway from self-hosted to Bedrock | Agent image unchanged, traffic moves | ⬜ |
 | H6 | **Nightly fine-tune**: TrainLoop CronJob runs, Evaluator scores the result, Model updated | Pipeline completes | ⬜ |
 | H7 | **New tool rollout**: add a tool to a ToolServer | Catalog updates, agents discover it without redeploy | ⬜ |
@@ -286,9 +286,9 @@ Nothing here runs a real model yet; every image in the suite is `busybox`.
 
 | ID | Case | Expected | |
 |---|---|---|---|
-| K1 | Model serving a real vLLM image | `/v1/models` responds through the Service | ⬜ |
-| K2 | Gateway running real LiteLLM with the generated config | Proxies a completion | ⬜ |
-| K3 | Agent image calling a tool from the catalog | Tool executes and returns | ⬜ |
+| K1 | Model serving a real vLLM image | `/v1/models` responds through the Service | ✅ |
+| K2 | Gateway running real LiteLLM with the generated config | Proxies a completion | ✅ |
+| K3 | Agent image calling a tool from the catalog | Tool executes and returns | ✅ |
 | K4 | Real Prometheus as the metric source | Autoscaler scales on a real query | ⬜ |
 | K5 | Real OTel Collector using the Tracer config | Traces arrive | ⬜ |
 | K6 | Dataset against real Kafka / S3 / Postgres | Connector config is usable as published | ⬜ |
@@ -307,8 +307,9 @@ connectors read fields that did not exist).
 
 What is left, in the order I would take it:
 
-1. **H1 / K1–K3 — a real request end to end.** Every image in the suite is `busybox`.
-   Nothing yet proves a real agent calls a real tool through a real gateway.
+1. **K4–K8 — the rest of the real stack.** `examples/demo.yaml` proves the loop with real
+   processes, but the model, gateway and tools are small stand-ins. Next: real vLLM, real
+   LiteLLM, real Prometheus, a real GPU node group.
 2. **G11/G13 — controller offline and API-server flapping.** The watch loop is tested;
    its behaviour under a broken API server is not.
 3. **I1–I6 — scale.** No test runs more than about forty objects.

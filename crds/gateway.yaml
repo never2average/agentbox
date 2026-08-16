@@ -223,6 +223,26 @@ spec:
                         type: integer
                         minimum: 1
                         default: 30
+                  files:
+                    type: object
+                    description: Files written into the container from a ConfigMap or Secret. The key
+                      is the mount path.
+                    additionalProperties:
+                      type: object
+                      required:
+                      - name
+                      properties:
+                        name:
+                          type: string
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          maxLength: 253
+                          description: ConfigMap or Secret name in the same namespace.
+                        kind:
+                          enum:
+                          - ConfigMap
+                          - Secret
+                          default: ConfigMap
+                          type: string
               replicas:
                 type: integer
                 minimum: 0

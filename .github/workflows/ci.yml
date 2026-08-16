@@ -34,6 +34,20 @@ jobs:
         run: python tools/generate_crds.py --check
       - name: CRD reference is up to date
         run: python tools/generate_crd_docs.py --check
+      - name: Install manifest is up to date
+        run: python tools/generate_install.py --check
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: The controller image builds
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: agentbox-controller:ci
 
   e2e:
     runs-on: ubuntu-latest
@@ -51,3 +65,8 @@ jobs:
           python tests/e2e_test.py \
             --context kind-kind \
             --kubeconfig "$HOME/.kube/config"
+      - name: Dump the demo namespace on failure
+        if: failure()
+        run: |
+          kubectl get pods -A || true
+          kubectl -n agentbox-demo-e2e describe pods || true

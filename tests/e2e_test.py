@@ -93,7 +93,8 @@ def load_examples():
 # --------------------------------------------------------------------------- 1
 def test_install(context, install):
     if not install:
-        return record("CRDs already installed (--no-install)", SKIP)
+        record("CRDs already installed (--no-install)", SKIP)
+        return True
 
     try:
         kubectl("apply", "-k", str(CRD_DIR), context=context)
@@ -121,8 +122,15 @@ def test_discovery(context, examples):
 
 # --------------------------------------------------------------------------- 2
 def test_examples_accepted(context, namespace, examples):
+    """
+    Apply every reference example. Compute is scaled down first: the examples
+    are sized for a real cluster and this often runs on a single kind node.
+    """
     ok = True
     for kind, (crd, example) in sorted(examples.items()):
+        compute = example.get("spec", {}).get("compute")
+        if isinstance(compute, dict) and "cpu" in compute:
+            compute["cpu"] = {"cores": 0.05, "memoryMb": 64}
         code, _, err = apply(example, context, namespace, check=False)
         if code != 0:
             ok &= record(f"apply example {kind}", FAIL, err.strip().splitlines()[-1][:220])
@@ -458,14 +466,14 @@ def test_python_workloads(context, namespace, kubeconfig):
         ("harness-runtime", {
             "kind": "HarnessRuntime", "metadata": {"name": "e2e-harness"},
             "spec": {"runtimeKind": "server", "code": {"image": "busybox:1.36"},
-                     "replicas": 1, "compute": {"cpu": {"cores": 1, "memoryMb": 128}},
+                     "replicas": 1, "compute": {"cpu": {"cores": 0.05, "memoryMb": 32}},
                      "endpoints": [{"name": "api", "port": 8080}],
                      "env": {"E2E": "true"}}},
          [("deployment", "e2e-harness"), ("service", "e2e-harness")]),
         ("tool-server", {
             "kind": "ToolServer", "metadata": {"name": "e2e-tools"},
             "spec": {"code": {"image": "busybox:1.36"}, "endpoint": {"port": 8080},
-                     "replicas": 1,
+                     "replicas": 1, "compute": {"cpu": {"cores": 0.05, "memoryMb": 32}},
                      "tools": [{"name": "noop", "parameters": {"type": "object"},
                                 "returns": {"type": "object"}}]}},
          [("deployment", "e2e-tools"), ("service", "e2e-tools")]),
@@ -759,14 +767,15 @@ def test_controller_serving_paths(context, namespace, kubeconfig):
                     "hubModelId": "org/served", "replicas": 1,
                     "serving": {"image": "busybox:1.36", "port": 8000,
                                 "nodeSelector": {"agentbox.io/gpu": "true"},
-                                "compute": {"cpu": {"cores": 1, "memoryMb": 128}}}}},
+                                "compute": {"cpu": {"cores": 0.05, "memoryMb": 32}}}}},
           context, namespace)
     apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Gateway",
            "metadata": {"name": "served-gateway"},
            "spec": {"modelName": "served", "replicas": 1,
                     "litellmParams": {"model": "openai/served", "apiBase": "http://x/v1"},
                     "modelInfo": {"id": "served", "mode": "chat"},
-                    "serving": {"image": "busybox:1.36", "port": 4000}}},
+                    "serving": {"image": "busybox:1.36", "port": 4000,
+                                "compute": {"cpu": {"cores": 0.05, "memoryMb": 32}}}}},
           context, namespace)
     _run_controller(kubeconfig, namespace)
 
@@ -802,17 +811,20 @@ def test_controller_workload_shapes(context, namespace, kubeconfig):
     ok = True
     apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "HarnessRuntime",
            "metadata": {"name": "batch-harness"},
-           "spec": {"runtimeKind": "batch", "code": {"image": "busybox:1.36", "args": ["true"]}}},
+           "spec": {"runtimeKind": "batch", "code": {"image": "busybox:1.36", "args": ["true"]},
+                    "compute": {"cpu": {"cores": 0.05, "memoryMb": 32}}}},
           context, namespace)
     apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "HarnessRuntime",
            "metadata": {"name": "cron-harness"},
            "spec": {"runtimeKind": "cron", "code": {"image": "busybox:1.36"},
+                    "compute": {"cpu": {"cores": 0.05, "memoryMb": 32}},
                     "schedule": {"cronExpression": "0 4 * * *", "timezone": "UTC"}}},
           context, namespace)
     apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "TrainLoop",
            "metadata": {"name": "oneshot-loop"},
            "spec": {"type": "training", "version": "1.0.0", "status": "active",
-                    "worker": {"image": "busybox:1.36", "args": ["true"]},
+                    "worker": {"image": "busybox:1.36", "args": ["true"],
+                               "compute": {"cpu": {"cores": 0.05, "memoryMb": 32}}},
                     "execution": {"mode": "continuous", "timeoutSeconds": 60}}},
           context, namespace)
     _run_controller(kubeconfig, namespace)
@@ -1188,6 +1200,7 @@ def test_controller_garbage_collection(context, namespace, kubeconfig):
     apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "ToolServer",
            "metadata": {"name": "doomed-tools"},
            "spec": {"code": {"image": "busybox:1.36"}, "endpoint": {"port": 8080},
+                    "compute": {"cpu": {"cores": 0.05, "memoryMb": 32}},
                     "tools": [{"name": "noop", "parameters": {"type": "object"},
                                "returns": {"type": "object"}}]}},
           context, namespace)
@@ -1292,15 +1305,22 @@ def test_leader_election(context, namespace, kubeconfig):
 def test_scaling_policies(context, namespace, kubeconfig):
     """Rate-limit policies cap how fast a target moves."""
     ok = True
-    kubectl("patch", "harnessswarmautoscalers", "api-harness-swarm", "-n", namespace,
-            "--type=merge", "-p", json.dumps({"spec": {
-                "bounds": {"minReplicas": 1, "maxReplicas": 50},
-                "behavior": {"scaleUp": {"stabilizationWindowSeconds": 0,
-                                         "policies": [{"type": "pods", "value": 2,
-                                                       "periodSeconds": 1}]},
-                             "scaleDown": {"stabilizationWindowSeconds": 0,
-                                           "selectPolicy": "disabled"}}}}),
-            context=context)
+    # Recreate the autoscaler so status.lastScaleTime starts empty; a scale from
+    # an earlier stage would otherwise gate the first step under a long period.
+    kubectl("delete", "harnessswarmautoscalers", "api-harness-swarm", "-n", namespace,
+            context=context, check=False)
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "HarnessSwarmAutoScaler",
+           "metadata": {"name": "api-harness-swarm"},
+           "spec": {"scaleTargetRef": {"kind": "HarnessRuntime", "name": "api-harness"},
+                    "bounds": {"minReplicas": 1, "maxReplicas": 50},
+                    "metrics": [{"type": "aiMetric", "metric": "pending-agent-sessions",
+                                 "target": {"metricType": "averageValue", "value": 5}}],
+                    "behavior": {"scaleUp": {"stabilizationWindowSeconds": 0,
+                                             "policies": [{"type": "pods", "value": 2,
+                                                           "periodSeconds": 300}]},
+                                 "scaleDown": {"stabilizationWindowSeconds": 0,
+                                               "selectPolicy": "disabled"}}}},
+          context, namespace)
     kubectl("patch", "harnessruntimes", "api-harness", "-n", namespace, "--type=merge",
             "-p", json.dumps({"spec": {"replicas": 2}}), context=context)
     _pin_metrics(context, namespace, {"pending-agent-sessions": 50})
@@ -1318,6 +1338,12 @@ def test_scaling_policies(context, namespace, kubeconfig):
                  PASS if gated == 4 and "policy period" in swarm.get("message", "") else FAIL,
                  f"replicas={gated}: {swarm.get('message')}")
 
+    # shorten the period so the next step is allowed, rather than racing a clock
+    kubectl("patch", "harnessswarmautoscalers", "api-harness-swarm", "-n", namespace,
+            "--type=merge", "-p", json.dumps({"spec": {"behavior": {"scaleUp": {
+                "stabilizationWindowSeconds": 0,
+                "policies": [{"type": "pods", "value": 2, "periodSeconds": 1}]}}}}),
+            context=context)
     time.sleep(2)
     _run_controller(kubeconfig, namespace)
     ok &= record("the next pass after the period steps by 2 again",
@@ -1624,7 +1650,8 @@ def test_api_edge_validation(context, namespace):
     code, _, err = apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "HarnessRuntime",
                           "metadata": {"name": "worker-harness"},
                           "spec": {"runtimeKind": "worker",
-                                   "code": {"image": "busybox:1.36"}}},
+                                   "code": {"image": "busybox:1.36"},
+                                   "compute": {"cpu": {"cores": 0.05, "memoryMb": 32}}}},
                          context, namespace, check=False)
     ok &= record("a worker harness without endpoints is accepted",
                  PASS if code == 0 else FAIL, err.strip()[:140])
@@ -1632,6 +1659,116 @@ def test_api_edge_validation(context, namespace):
     _, out, _ = kubectl("explain", "harnessruntime.spec.runtimeKind", context=context)
     ok &= record("kubectl explain renders field descriptions",
                  PASS if "Workload shape" in out else FAIL, out.strip()[:140])
+    return ok
+
+
+
+# -------------------------------------------------------------------------- 10
+def _wait_for(condition, timeout, interval=5):
+    """Poll a callable until it returns truthy, or the timeout expires."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = condition()
+        if result:
+            return result
+        time.sleep(interval)
+    return None
+
+
+def test_demo_real_request(context, namespace, kubeconfig):
+    """
+    The whole point, proven with real processes: an agent discovers a tool,
+    calls it, calls a gateway, and reaches a model behind it. Then a budget is
+    spent and the same agent is refused — without its image changing.
+    """
+    demo_ns = "agentbox-demo-e2e"
+    kubectl("create", "namespace", demo_ns, context=context, check=False)
+
+    manifest = (ROOT / "examples" / "demo.yaml").read_text().replace(
+        "agentbox-demo.svc", f"{demo_ns}.svc")
+    kubectl("apply", "-n", demo_ns, "-f", "-", context=context, input_text=manifest)
+    _run_controller(kubeconfig, demo_ns)
+
+    ok = True
+    ready = _wait_for(
+        lambda: all(
+            kubectl("get", "deployment", name, "-n", demo_ns,
+                    "-o", "jsonpath={.status.readyReplicas}",
+                    context=context, check=False)[1].strip() == "1"
+            for name in ("demo-small", "demo-gateway", "demo-tools")),
+        timeout=420)
+    ok &= record("the demo model, gateway and tool server all come up",
+                 PASS if ready else FAIL, "not ready within 300s")
+    if not ready:
+        kubectl("delete", "namespace", demo_ns, "--wait=false", context=context, check=False)
+        return ok
+
+    _run_controller(kubeconfig, demo_ns)
+    completed = _wait_for(
+        lambda: kubectl("get", "job", "demo-agent", "-n", demo_ns,
+                        "-o", "jsonpath={.status.succeeded}",
+                        context=context, check=False)[1].strip() == "1",
+        timeout=240)
+    _, logs, _ = kubectl("logs", "job/demo-agent", "-n", demo_ns, context=context, check=False)
+
+    ok &= record("the agent job completes", PASS if completed else FAIL, logs[-300:])
+    ok &= record("the agent discovers the tool from the published catalog",
+                 PASS if "discovered tool: summarize" in logs else FAIL, logs[-200:])
+    ok &= record("the tool server answers a real call",
+                 PASS if '"wordCount": 9' in logs else FAIL, logs[-200:])
+    ok &= record("the gateway routes to the model and returns a completion",
+                 PASS if "RESULT ok:" in logs else FAIL, logs[-200:])
+
+    # the generated config must be usable by a real LiteLLM, not just by our demo
+    _, config, _ = kubectl("get", "configmap", "demo-gateway-config", "-n", demo_ns,
+                           "-o", "jsonpath={.data.config\\.json}", context=context)
+    rendered = json.loads(config)
+    params = rendered["model_list"][0]["litellm_params"]
+    ok &= record("the gateway config is rendered in LiteLLM's dialect",
+                 PASS if "api_base" in params and "apiBase" not in params else FAIL,
+                 json.dumps(params))
+
+    # spend the budget: 50,000 tokens at 1 USD per 1,000 against a 10 USD limit
+    kubectl("create", "configmap", "agentbox-metrics", "--from-literal=demo-tokens=50000",
+            "-n", demo_ns, context=context, check=False)
+    _run_controller(kubeconfig, demo_ns)
+
+    meter = _status_of(context, demo_ns, "aimeters", "demo-spend")
+    ok &= record("the meter prices the usage and flags the breach",
+                 PASS if meter.get("currentCost") == 50 and meter.get("budgetExceeded")
+                 else FAIL, json.dumps(meter)[:180])
+
+    gateway = _status_of(context, demo_ns, "gateways", "demo-gateway")
+    ok &= record("the gateway is told to enforce the breach",
+                 PASS if "demo-spend" in (gateway.get("enforcing") or []) else FAIL,
+                 json.dumps(gateway)[:180])
+
+    seen = _wait_for(
+        lambda: "budget of 10 exceeded" in kubectl(
+            "exec", "deploy/demo-gateway", "-n", demo_ns, "--",
+            "cat", "/etc/agentbox/config.json", context=context, check=False)[1],
+        timeout=180)
+    ok &= record("the running gateway picks up the enforcement",
+                 PASS if seen else FAIL, "config did not refresh within 180s")
+
+    kubectl("delete", "job", "demo-agent", "-n", demo_ns, context=context, check=False)
+    _run_controller(kubeconfig, demo_ns)
+    _wait_for(
+        lambda: kubectl("get", "job", "demo-agent", "-n", demo_ns,
+                        "-o", "jsonpath={.status.succeeded}",
+                        context=context, check=False)[1].strip() == "1",
+        timeout=240)
+    _, blocked_logs, _ = kubectl("logs", "job/demo-agent", "-n", demo_ns,
+                                 context=context, check=False)
+
+    ok &= record("the same agent is refused once the budget is spent",
+                 PASS if "RESULT blocked: AIMeter/demo-spend" in blocked_logs else FAIL,
+                 blocked_logs[-300:])
+    ok &= record("the refusal names the policy that caused it",
+                 PASS if '"type": "throttle"' in blocked_logs else FAIL,
+                 blocked_logs[-200:])
+
+    kubectl("delete", "namespace", demo_ns, "--wait=false", context=context, check=False)
     return ok
 
 
@@ -1644,6 +1781,9 @@ def main():
                         help="kubeconfig the Python managers use; defaults to $KUBECONFIG")
     parser.add_argument("--no-install", action="store_true", help="assume CRDs are installed")
     parser.add_argument("--keep", action="store_true", help="do not clean up")
+    parser.add_argument("--skip-demo", action="store_true",
+                        help="skip examples/demo.yaml, which pulls real images")
+    parser.add_argument("--only", help="run only stages whose label contains this string")
     args = parser.parse_args()
 
     if not args.kubeconfig:
@@ -1671,7 +1811,15 @@ def main():
         time.sleep(2)
     kubectl("create", "namespace", args.namespace, context=args.context, check=False)
 
-    stages = [
+    stages = []
+
+    # The demo runs real pods. It goes first so it is not competing for a small
+    # node with the fixtures every other stage leaves behind.
+    if not args.skip_demo:
+        stages.append(("demo: a real request end to end", test_demo_real_request,
+                       (args.context, args.namespace, args.kubeconfig)))
+
+    stages += [
         ("discovery", test_discovery, (args.context, examples)),
         ("examples", test_examples_accepted, (args.context, args.namespace, examples)),
         ("defaulting", test_defaulting, (args.context, args.namespace)),
@@ -1731,6 +1879,10 @@ def main():
         ("controller idempotence", test_controller_idempotent,
          (args.context, args.namespace, args.kubeconfig)),
     ]
+
+    if args.only:
+        stages = [s for s in stages if args.only in s[0]]
+        print(f"running {len(stages)} stage(s) matching {args.only!r}\n")
 
     try:
         for label, fn, fn_args in stages:

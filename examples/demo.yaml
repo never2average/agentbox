@@ -1,0 +1,325 @@
+# AgentBox demo: a real request, end to end.
+#
+#   kubectl create namespace agentbox-demo
+#   kubectl apply -n agentbox-demo -f examples/demo.yaml
+#   kubectl -n agentbox-demo logs job/demo-agent -f
+#
+# Four things run for real:
+#
+#   Model       a tiny OpenAI-compatible server on the "GPU" node group
+#   Gateway     routes to it, and enforces whatever the controller tells it to
+#   ToolServer  serves one tool, and publishes its contract for discovery
+#   Harness     the developer's agent: calls the tool, then the gateway
+#
+# The programs are inlined here so the demo needs no registry. A real deployment
+# uses your own images; nothing else about these specs would change.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-programs
+data:
+  model.py: |
+    # Minimal OpenAI-compatible completion endpoint.
+    import json
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self._send(200, {"object": "list", "data": [{"id": "demo-small"}]})
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])) or b"{}")
+            prompt = body.get("messages", [{}])[-1].get("content", "")
+            self._send(200, {
+                "id": "demo-1",
+                "object": "chat.completion",
+                "model": "demo-small",
+                "choices": [{"index": 0, "finish_reason": "stop",
+                             "message": {"role": "assistant",
+                                         "content": f"answered: {prompt[:80]}"}}],
+                "usage": {"prompt_tokens": len(prompt.split()),
+                          "completion_tokens": 8, "total_tokens": len(prompt.split()) + 8},
+            })
+
+        def _send(self, code, payload):
+            data = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    HTTPServer(("", 8000), Handler).serve_forever()
+
+  gateway.py: |
+    # Routes to the upstream named in the config the controller renders, and
+    # applies whatever enforcement that config carries. This is the whole point
+    # of the Gateway object: the agent never learns which model it reached, and
+    # a tripped Guardrail or a spent budget stops traffic without touching the
+    # agent's image.
+    import json, os, urllib.request
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    CONFIG = "/etc/agentbox/config.json"
+
+    def config():
+        try:
+            with open(CONFIG) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def upstream_of(current):
+        models = current.get("model_list") or [{}]
+        return models[0].get("litellm_params", {}).get("api_base")
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            current = config()
+            if not upstream_of(current):
+                # Not configured yet. Saying so is the readiness signal.
+                self._send(503, {"error": "waiting for the controller to publish a config"})
+                return
+            self._send(200, {"enforcement": current.get("enforcement", [])})
+
+        def do_POST(self):
+            current = config()
+            body = self.rfile.read(int(self.headers["Content-Length"]) or 0)
+
+            upstream = upstream_of(current)
+            if not upstream:
+                self._send(503, {"error": "no upstream configured"})
+                return
+
+            for rule in current.get("enforcement", []):
+                if rule.get("effect") in ("throttle", "block", "deny", "limit"):
+                    self._send(429, {"error": {
+                        "type": rule["effect"],
+                        "source": f"{rule['kind']}/{rule['source']}",
+                        "message": rule.get("message", "blocked by policy"),
+                    }})
+                    return
+
+            request = urllib.request.Request(
+                f"{upstream}/chat/completions", data=body,
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read())
+            payload["gateway"] = os.environ.get("AGENTBOX_RESOURCE_NAME")
+            self._send(200, payload)
+
+        def _send(self, code, payload):
+            data = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    HTTPServer(("", 4000), Handler).serve_forever()
+
+  tools.py: |
+    # A tool server. Its contract is published by the controller into
+    # /etc/agentbox/catalog.json, which is how callers discover it.
+    import json
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            with open("/etc/agentbox/catalog.json") as f:
+                self._send(200, json.load(f))
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])) or b"{}")
+            text = body.get("text", "")
+            self._send(200, {"summary": " ".join(text.split()[:5]),
+                             "wordCount": len(text.split())})
+
+        def _send(self, code, payload):
+            data = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    HTTPServer(("", 8080), Handler).serve_forever()
+
+  agent.py: |
+    # The developer's agent. It knows two service names and nothing else: not
+    # which model is behind the gateway, not where the weights live, not what
+    # the budget is.
+    import json, os, sys, time, urllib.request
+
+    GATEWAY = os.environ["GATEWAY_URL"]
+    TOOLS = os.environ["TOOLS_URL"]
+
+    def post(url, payload):
+        request = urllib.request.Request(
+            url, data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+
+    def get(url):
+        with urllib.request.urlopen(url, timeout=10) as response:
+            return json.loads(response.read())
+
+    def wait_for(url, label):
+        for _ in range(60):
+            try:
+                return get(url)
+            except Exception:
+                time.sleep(2)
+        print(f"{label} never became reachable", file=sys.stderr)
+        raise SystemExit(1)
+
+    catalog = wait_for(f"{TOOLS}/", "tool server")
+    wait_for(f"{GATEWAY}/", "gateway")
+
+    tool = catalog["tools"][0]
+    print(f"discovered tool: {tool['name']} at {tool['url']}")
+
+    status, summary = post(tool["url"], {"text": "the quick brown fox jumps over the lazy dog"})
+    print(f"tool responded {status}: {json.dumps(summary)}")
+
+    status, completion = post(f"{GATEWAY}/chat/completions", {
+        "model": "demo-small",
+        "messages": [{"role": "user", "content": f"summarise: {summary.get('summary')}"}],
+    })
+    print(f"gateway responded {status}: {json.dumps(completion)[:200]}")
+
+    if status == 200:
+        print("RESULT ok:", completion["choices"][0]["message"]["content"])
+    else:
+        print("RESULT blocked:", completion.get("error", {}).get("source"))
+---
+apiVersion: ai.agentbox.io/v1beta1
+kind: Model
+metadata:
+  name: demo-small
+spec:
+  modelName: demo-small
+  modelHub: custom
+  hubModelId: demo/small
+  replicas: 1
+  serving:
+    image: python:3.12-alpine
+    entrypoint: python
+    args: ["/programs/model.py"]
+    port: 8000
+    compute:
+      cpu: { cores: 0.1, memoryMb: 96 }
+    files:
+      /programs: { name: demo-programs }
+---
+apiVersion: ai.agentbox.io/v1beta1
+kind: Gateway
+metadata:
+  name: demo-gateway
+spec:
+  modelName: demo-small
+  litellmParams:
+    model: openai/demo-small
+    apiBase: http://demo-small.agentbox-demo.svc:8000
+  modelInfo:
+    id: demo-small
+    mode: chat
+  serving:
+    image: python:3.12-alpine
+    entrypoint: python
+    args: ["/programs/gateway.py"]
+    port: 4000
+    compute:
+      cpu: { cores: 0.1, memoryMb: 96 }
+    health:
+      type: http
+      path: /
+      port: 4000
+      initialDelaySeconds: 3
+      periodSeconds: 3
+    files:
+      /programs: { name: demo-programs }
+---
+apiVersion: ai.agentbox.io/v1beta1
+kind: ToolServer
+metadata:
+  name: demo-tools
+spec:
+  code:
+    image: python:3.12-alpine
+    entrypoint: python
+    args: ["/programs/tools.py"]
+  endpoint:
+    port: 8080
+  compute:
+    cpu: { cores: 0.1, memoryMb: 96 }
+  files:
+    /programs: { name: demo-programs }
+  tools:
+    - name: summarize
+      description: Return the first few words of a text and its length
+      path: /summarize
+      parameters:
+        type: object
+        properties:
+          text: { type: string }
+        required: [text]
+      returns:
+        type: object
+---
+apiVersion: ai.agentbox.io/v1beta1
+kind: HarnessRuntime
+metadata:
+  name: demo-agent
+spec:
+  runtimeKind: batch
+  code:
+    image: python:3.12-alpine
+    entrypoint: python
+    args: ["/programs/agent.py"]
+  compute:
+    cpu: { cores: 0.1, memoryMb: 96 }
+  env:
+    GATEWAY_URL: http://demo-gateway.agentbox-demo.svc:4000
+    TOOLS_URL: http://demo-tools.agentbox-demo.svc:8080
+  files:
+    /programs: { name: demo-programs }
+---
+# Metered against a budget. Raise the metric past the limit and the gateway
+# starts refusing traffic, without the agent changing.
+apiVersion: ai.agentbox.io/v1beta1
+kind: AIMeter
+metadata:
+  name: demo-spend
+spec:
+  usage:
+    unit: totalTokens
+    source:
+      metric: demo-tokens
+    subjects: [demo-gateway]
+  window:
+    type: billingPeriod
+    period: monthly
+  pricing:
+    currency: USD
+    model: perUnit
+    unitPrice: 1.0
+    perUnits: 1000
+  budget:
+    limit: 10
+    limitType: cost
+    onExceed: throttle

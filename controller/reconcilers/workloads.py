@@ -4,6 +4,7 @@ The kinds that put pods on the cluster: HarnessRuntime, ToolServer, Model,
 Gateway, TrainLoop and Evaluator.
 """
 import json
+import re
 from typing import Any, Dict, List
 
 from kubernetes import client
@@ -14,6 +15,86 @@ from k8s_modules import podspec
 
 RUN_ANNOTATION = "agentbox.io/run"
 LAST_RUN_ANNOTATION = "agentbox.io/last-run"
+
+
+def _snake(name: str) -> str:
+    """camelCase to snake_case."""
+    return re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', name).lower()
+
+
+def _litellm_dialect(params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Render gateway parameters in LiteLLM's own vocabulary.
+
+    The CRD is camelCase because that is the Kubernetes convention; LiteLLM
+    expects snake_case. The controller translates, so the generated config can
+    be handed to a real LiteLLM process unchanged.
+
+    Args:
+        params: spec.litellmParams, minus credentials
+
+    Returns:
+        The same values under LiteLLM's key names
+    """
+    return {_snake(key): value for key, value in params.items()}
+
+
+def _enforcement_for(ctx: Context, gateway: str, namespace: str) -> List[Dict[str, Any]]:
+    """
+    Effects the data plane must apply to this gateway right now.
+
+    Two sources: guardrails that have tripped and scope this gateway, and meters
+    whose budget is spent with an onExceed other than alert. The controller
+    decides; the gateway enforces.
+
+    Args:
+        ctx: Controller context
+        gateway: Gateway name
+        namespace: Namespace to search
+
+    Returns:
+        List of {source, kind, effect, message} entries
+    """
+    active = []
+
+    for guardrail in ctx.list_resources("guardrails"):
+        if guardrail["metadata"]["namespace"] != namespace:
+            continue
+        state = guardrail.get("status") or {}
+        if not state.get("triggered"):
+            continue
+        scope = guardrail.get("spec", {}).get("scope", {})
+        targets = scope.get("targets")
+        if targets and gateway not in targets:
+            continue
+        active.append({
+            "source": guardrail["metadata"]["name"],
+            "kind": "Guardrail",
+            "effect": guardrail["spec"].get("effect", {}).get("type"),
+            "parameters": guardrail["spec"].get("effect", {}).get("parameters", {}),
+            "message": state.get("message", ""),
+        })
+
+    for meter in ctx.list_resources("aimeters"):
+        if meter["metadata"]["namespace"] != namespace:
+            continue
+        state = meter.get("status") or {}
+        budget = meter.get("spec", {}).get("budget", {})
+        on_exceed = budget.get("onExceed", "alert")
+        if not state.get("budgetExceeded") or on_exceed == "alert":
+            continue
+        subjects = meter.get("spec", {}).get("usage", {}).get("subjects")
+        if subjects and gateway not in subjects:
+            continue
+        active.append({
+            "source": meter["metadata"]["name"],
+            "kind": "AIMeter",
+            "effect": on_exceed,
+            "parameters": {},
+            "message": f"budget of {budget.get('limit')} exceeded",
+        })
+
+    return active
 
 
 def _service_ports(endpoints: List[Dict[str, Any]]) -> List[client.V1ServicePort]:
@@ -86,11 +167,13 @@ def reconcile_harness_runtime(ctx: Context, resource: Dict[str, Any]) -> Dict[st
     endpoints = spec.get("endpoints", [])
     ports = [e["port"] for e in endpoints]
     names = [e["name"] for e in endpoints]
-    box = podspec.container(name, spec, "harness-runtime", ports=ports, port_names=names)
+    volumes, volume_mounts = podspec.mounts(spec.get("files"))
+    box = podspec.container(name, spec, "harness-runtime", ports=ports, port_names=names,
+                            volume_mounts=volume_mounts)
 
     if kind in ("server", "worker"):
         children.ensure_deployment(ctx, podspec.deployment(
-            name, namespace, labels, spec.get("replicas", 1), [box], owner))
+            name, namespace, labels, spec.get("replicas", 1), [box], owner, volumes))
         if endpoints:
             children.ensure_service(ctx, podspec.service(
                 name, namespace, labels, _service_ports(endpoints), owner))
@@ -112,12 +195,13 @@ def reconcile_harness_runtime(ctx: Context, resource: Dict[str, Any]) -> Dict[st
     if kind == "cron":
         schedule = podspec.schedule_expression(spec.get("schedule", {}))
         children.ensure_cronjob(ctx, podspec.cronjob(
-            name, namespace, labels, schedule, [box], owner=owner))
+            name, namespace, labels, schedule, [box], owner=owner, volumes=volumes))
         return status.build(resource, "active", f"scheduled: {schedule}",
                             [status.condition(status.READY, True, "CronJobScheduled")],
                             schedule=schedule)
 
-    children.ensure_job(ctx, podspec.job(name, namespace, labels, [box], owner=owner))
+    children.ensure_job(ctx, podspec.job(name, namespace, labels, [box], owner=owner,
+                                        volumes=volumes))
     counts = _job_status(ctx, name, namespace)
     state = _job_state(counts)
     return status.build(resource, state, f"job is {state}",
@@ -144,11 +228,14 @@ def reconcile_tool_server(ctx: Context, resource: Dict[str, Any]) -> Dict[str, A
         return status.build(resource, "suspended", "spec.enabled is false",
                             [status.condition(status.READY, False, "Disabled")])
 
+    files = dict(spec.get("files") or {})
+    files.setdefault("/etc/agentbox", {"name": f"{name}-tools"})
+    volumes, volume_mounts = podspec.mounts(files)
     box = podspec.container(name, spec, "tool-server",
                             ports=[port] if port else None, port_names=["tools"],
-                            with_probe=False)
+                            with_probe=False, volume_mounts=volume_mounts)
     children.ensure_deployment(ctx, podspec.deployment(
-        name, namespace, labels, spec.get("replicas", 1), [box], owner))
+        name, namespace, labels, spec.get("replicas", 1), [box], owner, volumes))
 
     if port:
         children.ensure_service(ctx, podspec.service(
@@ -219,12 +306,15 @@ def reconcile_model(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]:
     labels = children.labels_for(resource, "model")
     port = serving.get("port", 8000)
 
+    volumes, volume_mounts = podspec.mounts(serving.get("files"))
     box = podspec.container(name, {"code": serving, "compute": serving.get("compute", {}),
                                    "env": serving.get("env", {}),
                                    "health": serving.get("health", {})},
-                            "model", ports=[port], port_names=["http"])
+                            "model", ports=[port], port_names=["http"],
+                            volume_mounts=volume_mounts)
     deployment = podspec.deployment(
-        name, namespace, labels, spec.get("replicas", serving.get("replicas", 1)), [box], owner)
+        name, namespace, labels, spec.get("replicas", serving.get("replicas", 1)), [box],
+        owner, volumes)
 
     node_selector = serving.get("nodeSelector")
     if node_selector:
@@ -265,12 +355,16 @@ def reconcile_gateway(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]:
     labels = children.labels_for(resource, "gateway")
 
     params = {k: v for k, v in spec.get("litellmParams", {}).items() if k != "apiKey"}
+    enforcement = _enforcement_for(ctx, name, namespace)
     config = {
         "model_list": [{
             "model_name": spec["modelName"],
-            "litellm_params": params,
-            "model_info": spec.get("modelInfo", {}),
-        }]
+            "litellm_params": _litellm_dialect(params),
+            "model_info": _litellm_dialect(spec.get("modelInfo", {})),
+        }],
+        # What the data plane must act on right now. A gateway reads this and
+        # throttles, blocks or reroutes; the controller only decides.
+        "enforcement": enforcement,
     }
     children.ensure_config_map(ctx, children.config_map(
         f"{name}-config", namespace, labels,
@@ -284,14 +378,20 @@ def reconcile_gateway(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]:
             [status.condition(status.READY, True, "ConfigPublished")],
             configMap=f"{name}-config",
             upstream=params.get("model"),
+            enforcing=[e["source"] for e in enforcement],
         )
 
     port = serving.get("port", 4000)
+    files = dict(serving.get("files") or {})
+    files.setdefault("/etc/agentbox", {"name": f"{name}-config"})
+    volumes, volume_mounts = podspec.mounts(files)
     box = podspec.container(name, {"code": serving, "compute": serving.get("compute", {}),
-                                   "env": serving.get("env", {})},
-                            "gateway", ports=[port], port_names=["http"], with_probe=False)
+                                   "env": serving.get("env", {}),
+                                   "health": serving.get("health", {})},
+                            "gateway", ports=[port], port_names=["http"],
+                            volume_mounts=volume_mounts)
     children.ensure_deployment(ctx, podspec.deployment(
-        name, namespace, labels, serving.get("replicas", 1), [box], owner))
+        name, namespace, labels, serving.get("replicas", 1), [box], owner, volumes))
     children.ensure_service(ctx, podspec.service(
         name, namespace, labels,
         [client.V1ServicePort(name="http", port=port, target_port=port, protocol="TCP")],
@@ -308,6 +408,7 @@ def reconcile_gateway(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]:
         address=f"{name}.{namespace}.svc:{port}",
         replicas=counts["replicas"],
         readyReplicas=counts["readyReplicas"],
+        enforcing=[e["source"] for e in enforcement],
     )
 
 
