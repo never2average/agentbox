@@ -38,7 +38,8 @@ jobs:
       - name: Package and push the chart
         run: |
           version="${{ github.ref_name }}"
-          helm package charts/agentbox --version "${version#v}" --app-version "${version#v}"
+          # chart versions are SemVer without a v; appVersion is the image tag, with one
+          helm package charts/agentbox --version "${version#v}" --app-version "$version"
           helm registry login ghcr.io -u ${{ github.actor }} \
             --password ${{ secrets.GITHUB_TOKEN }}
           helm push "agentbox-${version#v}.tgz" \

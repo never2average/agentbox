@@ -3,7 +3,8 @@ name: agentbox
 description: Kubernetes primitives for running a company-wide AI stack
 type: application
 version: 0.1.0
-appVersion: "0.1.0"
+# appVersion is the controller image tag, which carries the v prefix.
+appVersion: "v0.1.0"
 home: https://github.com/never2average/agentbox
 sources:
   - https://github.com/never2average/agentbox

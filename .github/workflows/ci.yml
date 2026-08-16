@@ -40,6 +40,16 @@ jobs:
         run: python tools/sync_chart.py --check
       - name: Helm chart lints
         run: helm lint charts/agentbox
+      - name: The chart asks for an image tag that exists
+        run: |
+          rendered=$(helm template agentbox charts/agentbox \
+            | grep -oE 'ghcr.io/[^"]*agentbox-controller:[^ ]+' | head -1)
+          appversion=$(grep '^appVersion:' charts/agentbox/Chart.yaml | tr -d '"' | awk '{print $2}')
+          echo "rendered: $rendered"
+          case "$rendered" in
+            *:"$appVersion") ;;
+            *) echo "chart renders $rendered but appVersion is $appVersion"; exit 1 ;;
+          esac
 
   image:
     runs-on: ubuntu-latest
@@ -66,13 +76,17 @@ jobs:
         run: pip install -r requirements.txt
       - name: Build the controller image and load it into the cluster
         run: |
+          # the kind action picks the cluster name, so read it back rather than
+          # assuming one
+          context=$(kubectl config current-context)
+          echo "KUBE_CONTEXT=$context" >> "$GITHUB_ENV"
           docker build -t ghcr.io/never2average/agentbox-controller:latest .
           kind load docker-image ghcr.io/never2average/agentbox-controller:latest \
-            --name chart-testing
+            --name "${context#kind-}"
       - name: End-to-end suite
         run: |
           python tests/e2e_test.py \
-            --context kind-chart-testing \
+            --context "$KUBE_CONTEXT" \
             --kubeconfig "$HOME/.kube/config" \
             --image ghcr.io/never2average/agentbox-controller:latest
       - name: Dump state on failure
