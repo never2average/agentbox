@@ -231,6 +231,13 @@ spec:
                         type: integer
                         minimum: 0
                         default: 300
+              tolerance:
+                type: number
+                minimum: 0
+                maximum: 1
+                default: 0.1
+                description: Relative deviation from target to ignore, so a metric hovering near its target
+                  does not cause churn.
               sessionAffinity:
                 type: object
                 description: How in-flight agent sessions are treated while the swarm resizes.

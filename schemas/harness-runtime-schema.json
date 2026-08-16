@@ -63,9 +63,6 @@
           "additionalProperties": {
             "type": "string"
           },
-          "propertyNames": {
-            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-          },
           "description": "Environment variables passed to the image. Secret-looking values are moved into a Secret."
         },
         "endpoints": {
@@ -98,6 +95,10 @@
         {
           "rule": "!has(self.health) || self.health.type != 'exec' || has(self.health.command)",
           "message": "health.command is required when health.type is exec"
+        },
+        {
+          "rule": "!has(self.env) || self.env.all(k, k.matches('^[A-Za-z_][A-Za-z0-9_]*$'))",
+          "message": "env keys must be valid environment variable names"
         }
       ]
     },

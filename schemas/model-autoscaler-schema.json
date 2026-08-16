@@ -72,6 +72,13 @@
           "$ref": "common-schema.json#/definitions/scalingBehavior",
           "description": "Stabilisation windows and rate limits on scale up and scale down."
         },
+        "tolerance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.1,
+          "description": "Relative deviation from target to ignore, so a metric hovering near its target does not cause churn."
+        },
         "placement": {
           "type": "object",
           "description": "Where new replicas may land. Node supply itself is delegated to the existing cluster autoscaler CRDs.",

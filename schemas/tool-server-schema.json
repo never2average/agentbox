@@ -73,9 +73,6 @@
           "additionalProperties": {
             "type": "string"
           },
-          "propertyNames": {
-            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-          },
           "description": "Environment variables passed to the image. Secret-looking values are moved into a Secret."
         },
         "enabled": {
@@ -105,6 +102,10 @@
         {
           "rule": "self.tools.all(t, self.tools.filter(o, o.name == t.name).size() == 1)",
           "message": "tool names must be unique within a tool server"
+        },
+        {
+          "rule": "!has(self.env) || self.env.all(k, k.matches('^[A-Za-z_][A-Za-z0-9_]*$'))",
+          "message": "env keys must be valid environment variable names"
         }
       ]
     },

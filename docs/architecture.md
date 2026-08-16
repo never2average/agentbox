@@ -135,4 +135,5 @@ See [controller.md](controller.md) for what each kind produces.
   defaulting or mutating webhook.
 - **Guardrail effects are reported, not enforced.** The controller evaluates conditions and
   records the verdict; acting on it belongs to the gateway or the harness.
-- **The controller is single-replica.** There is no leader election yet.
+- **No real-workload tests.** Every image in the end-to-end suite is `busybox`, so what
+is proven is that the right objects get built, not that a model serves tokens.

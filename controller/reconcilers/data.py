@@ -12,13 +12,13 @@ from controller.context import Context
 CONNECTOR_ADDRESS = {
     "httpPoll": lambda c: c.get("url"),
     "webhook": lambda c: c.get("path"),
-    "kafka": lambda c: ",".join(c.get("brokers", [])) or None,
+    "kafka": lambda c: ",".join(c.get("brokers") or []) or None,
     "queue": lambda c: c.get("queueUrl") or c.get("queueName"),
     "s3": lambda c: f"s3://{c.get('bucket', '')}/{c.get('prefix', '')}".rstrip("/"),
-    "fs": lambda c: c.get("path"),
-    "database": lambda c: c.get("host"),
+    "fs": lambda c: c.get("basePath"),
+    "database": lambda c: (c.get("connection") or {}).get("host"),
     "grpc": lambda c: c.get("target") or c.get("endpoint"),
-    "pubsub": lambda c: c.get("subscription", {}).get("id") or c.get("topic"),
+    "pubsub": lambda c: (c.get("subscription") or {}).get("id") or c.get("topic"),
 }
 
 

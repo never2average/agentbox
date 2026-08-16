@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from kubernetes import client, watch
 
 from controller.context import GROUP, VERSION, Context, logger
+from controller.leader import LeaderElector
 from controller.reconcilers import data, governance, scaling, workloads
 
 Reconciler = Callable[[Context, Dict[str, Any]], Dict[str, Any]]
@@ -43,16 +44,18 @@ class Manager:
     """Runs the reconcile loop for every AgentBox kind."""
 
     def __init__(self, ctx: Context, resync_seconds: int = 60,
-                 workers: int = 4):
+                 workers: int = 4, elector: Optional[LeaderElector] = None):
         """
         Args:
             ctx: Controller context
             resync_seconds: How often to re-reconcile everything
             workers: Number of reconcile threads
+            elector: Leader elector; when set, only the holder reconciles
         """
         self.ctx = ctx
         self.resync_seconds = resync_seconds
         self.workers = workers
+        self.elector = elector
         self.queue: "queue.Queue[Tuple[str, str, str]]" = queue.Queue()
         self.stop = threading.Event()
         self.reconciled = 0
@@ -168,7 +171,8 @@ class Manager:
             except queue.Empty:
                 continue
             try:
-                self.reconcile_one(plural, namespace, name)
+                if self.elector is None or self.elector.is_leader.is_set():
+                    self.reconcile_one(plural, namespace, name)
             finally:
                 self.queue.task_done()
 
@@ -193,6 +197,15 @@ class Manager:
                     len(RECONCILERS), self.workers, self.resync_seconds)
 
         threads = []
+
+        if self.elector is not None:
+            thread = threading.Thread(target=self.elector.run, daemon=True)
+            thread.start()
+            threads.append(thread)
+            logger.info("waiting for leadership")
+            while not self.elector.is_leader.is_set() and not self.stop.is_set():
+                self.stop.wait(1)
+
         for _ in range(self.workers):
             thread = threading.Thread(target=self._worker, daemon=True)
             thread.start()
@@ -205,6 +218,9 @@ class Manager:
 
         try:
             while not self.stop.is_set():
+                if self.elector is not None and not self.elector.is_leader.is_set():
+                    self.stop.wait(self.resync_seconds)
+                    continue
                 count = self.resync()
                 logger.debug("resync enqueued %d resources", count)
                 self.stop.wait(self.resync_seconds)
@@ -212,5 +228,7 @@ class Manager:
             logger.info("shutting down")
         finally:
             self.stop.set()
+            if self.elector is not None:
+                self.elector.release()
             for thread in threads:
                 thread.join(timeout=2)

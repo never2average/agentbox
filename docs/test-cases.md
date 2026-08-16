@@ -2,7 +2,7 @@
 
 Everything worth running against the AgentBox CRDs, whether or not it is automated yet.
 
-`tests/e2e_test.py` currently automates 173 assertions against a live API server. This is
+`tests/e2e_test.py` currently automates 233 assertions against a live API server. This is
 the wider catalogue: what that suite covers, and what a serious production rollout would
 want on top of it.
 
@@ -37,15 +37,15 @@ Does the API server accept, reject and store what the schemas say it should?
 | A8 | Send an invalid enum value | Rejected | ✅ |
 | A9 | Violate the image-reference pattern | Rejected | ✅ |
 | A10 | Port outside 1–65535 | Rejected | ✅ |
-| A11 | Invalid cron expression | Rejected by pattern | ⬜ |
-| A12 | `metadata.name` longer than 253 chars or not DNS-1123 | Rejected | ⬜ |
-| A13 | Semver pattern on version fields | Rejected when malformed | ⬜ |
-| A14 | Apply an object with an explicit wrong `apiVersion` | Rejected | ⬜ |
-| A15 | `kubectl explain harnessruntime.spec` | Descriptions render for every field | ⬜ |
+| A11 | Invalid cron expression | Rejected by pattern | ✅ |
+| A12 | `metadata.name` longer than 253 chars or not DNS-1123 | Rejected | ✅ |
+| A13 | Semver pattern on version fields | Rejected when malformed | ✅ |
+| A14 | Apply an object with an explicit wrong `apiVersion` | Rejected | ✅ |
+| A15 | `kubectl explain harnessruntime.spec` | Descriptions render for every field | ✅ |
 | A16 | Printer columns render | `kubectl get` shows the declared columns for each kind | ✅ |
 | A17 | Status subresource accepts a write | Status persists, spec untouched | ✅ |
 | A18 | Spec write leaves status intact | Status survives | ✅ |
-| A19 | `kubectl scale` on HarnessRuntime, ToolServer, Model | `spec.replicas` changes | 🔶 (Model not asserted) |
+| A19 | `kubectl scale` on HarnessRuntime, ToolServer, Model | `spec.replicas` changes | ✅ |
 | A20 | Server-side apply from two field managers | No ownership conflict on unrelated fields | ⬜ |
 | A21 | `kubectl diff` on an unchanged object | Empty | ⬜ |
 
@@ -64,8 +64,8 @@ Does the API server accept, reject and store what the schemas say it should?
 | A30 | Duplicate tool names in one ToolServer | Rejected | ✅ |
 | A31 | `execution.mode: scheduled` without a schedule | Rejected | ✅ |
 | A32 | `window.type: billingPeriod` without `period` | Rejected | ✅ |
-| A33 | Tumbling window without `durationSeconds` | Rejected | ⬜ |
-| A34 | `pricing.model: tiered` without `tiers` | Rejected | ⬜ |
+| A33 | Tumbling window without `durationSeconds` | Rejected | ✅ |
+| A34 | `pricing.model: tiered` without `tiers` | Rejected | ✅ |
 | A35 | Zero or two Evaluator dataset sources | Rejected | ✅ |
 | A36 | `Model.serving` without an image | Rejected | ✅ |
 | A37 | Gateway `serving` without an image | Rejected | ✅ |
@@ -80,11 +80,11 @@ Does the controller build the right thing, own it, and say so?
 | ID | Case | Expected | |
 |---|---|---|---|
 | B1 | HarnessRuntime `server` | Deployment + Service, `status.endpoints` populated | ✅ |
-| B2 | HarnessRuntime `worker` | Deployment, no Service | ⬜ |
+| B2 | HarnessRuntime `worker` | Deployment, no Service | ✅ |
 | B3 | HarnessRuntime `batch` | Job, no Deployment | ✅ |
 | B4 | HarnessRuntime `cron` | CronJob carrying the declared schedule | ✅ |
 | B5 | HarnessRuntime with GPU compute | Deployment requests `nvidia.com/gpu` | ⬜ |
-| B6 | HarnessRuntime with `env` | Env vars land on the container | 🔶 |
+| B6 | HarnessRuntime with `env` | Env vars land on the container | ✅ |
 | B7 | HarnessRuntime health `http`/`tcp`/`exec` | Correct probe shape on the pod | ⬜ |
 | B8 | ToolServer | Deployment + Service + catalog ConfigMap | ✅ |
 | B9 | ToolServer catalog | Each tool has a resolvable URL and its contract | ✅ |
@@ -97,27 +97,27 @@ Does the controller build the right thing, own it, and say so?
 | B16 | Gateway config content | Valid LiteLLM `model_list`, `apiKey` excluded | 🔶 (structure not asserted) |
 | B17 | TrainLoop scheduled | CronJob | ✅ |
 | B18 | TrainLoop unscheduled | Job | ✅ |
-| B19 | TrainLoop `lifecycle.restartPolicy.maxRestarts` | Becomes the Job `backoffLimit` | ⬜ |
+| B19 | TrainLoop `lifecycle.restartPolicy.maxRestarts` | Becomes the Job `backoffLimit` | ✅ |
 | B20 | Evaluator | Suite ConfigMap with dataset and scoring | ✅ |
 | B21 | Evaluator run annotation | Exactly one Job, `status.lastRunId` set | ✅ |
 | B22 | Same run id reapplied | No second Job | ✅ |
-| B23 | New run id | A second Job with the new name | ⬜ |
-| B24 | Evaluator run without `runConfig.image` | `failed` state, warning event, no Job | ⬜ |
+| B23 | New run id | A second Job with the new name | ✅ |
+| B24 | Evaluator run without `runConfig.image` | `failed` state, warning event, no Job | ✅ |
 | B25 | AgentIdP | ServiceAccount + Role + RoleBinding | ✅ |
 | B26 | AgentIdP `identity[].annotations` | Projected onto the ServiceAccount (IRSA-style) | ⬜ |
 | B27 | AIMetric | Recording-rule ConfigMap, `status.currentValue` when available | ✅ |
 | B28 | AIMetric `metricMath` type | Expression lands in the rule | ⬜ |
 | B29 | Tracer | Collector config with the declared resource attributes | ✅ |
 | B30 | Dataset | Connector ConfigMap, `status.address` derived per connector type | ✅ |
-| B31 | Dataset, each of the 9 connector types | Address derived correctly for each | ⬜ |
+| B31 | Dataset, each of the 9 connector types | Address derived correctly for each | ✅ |
 | B32 | Recipe | Stages topologically sorted into `status.resolvedOrder` | ✅ |
 | B33 | Recipe with a dependency cycle | `failed`, message names the cycle | ✅ |
 | B34 | Recipe with an unknown dependency | `failed`, message names it | ✅ |
-| B35 | Recipe with duplicate stage ids | `failed` | ⬜ |
+| B35 | Recipe with duplicate stage ids | `failed` | ✅ |
 | B36 | Every child has an owner reference | Controller-owned, blockOwnerDeletion | ✅ |
-| B37 | Delete a parent | Children garbage-collected | 🔶 (via managers, not controller) |
+| B37 | Delete a parent | Children garbage-collected | ✅ |
 | B38 | Every kind writes conditions | `Ready` present with a reason | ✅ |
-| B39 | `observedGeneration` tracks `metadata.generation` | Matches after reconcile | ⬜ |
+| B39 | `observedGeneration` tracks `metadata.generation` | Matches after reconcile | ✅ |
 | B40 | Reconcile twice with no change | No spurious writes, no failures | ✅ |
 
 ---
@@ -127,24 +127,24 @@ Does the controller build the right thing, own it, and say so?
 | ID | Case | Expected | |
 |---|---|---|---|
 | C1 | Metric 5× over target | Replicas scale by the HPA formula | ✅ |
-| C2 | Metric under target | Scales down | 🔶 |
+| C2 | Metric under target | Scales down | ✅ |
 | C3 | Metric within 10% of target | No change | ✅ |
 | C4 | Metric at exactly the target | No change | ✅ |
-| C5 | Two metrics disagreeing | Highest demand wins | ⬜ |
-| C6 | Demand above `maxReplicas` | Clamped to the ceiling | 🔶 |
-| C7 | Demand below `minReplicas` | Clamped to the floor | ⬜ |
+| C5 | Two metrics disagreeing | Highest demand wins | ✅ |
+| C6 | Demand above `maxReplicas` | Clamped to the ceiling | ✅ |
+| C7 | Demand below `minReplicas` | Clamped to the floor | ✅ |
 | C8 | `scaleToZero.enabled`, no demand | Reaches 0 | ✅ |
 | C9 | Demand returns at 0 replicas | Activates 1, then scales normally | ✅ |
 | C10 | Scale-up stabilization window | Blocks the next scale up, status says so | ✅ |
-| C11 | Scale-down stabilization window | Blocks the next scale down | ⬜ |
-| C12 | `behavior.scaleUp.policies` rate limits | Step size respected | ⬜ (not implemented) |
+| C11 | Scale-down stabilization window | Blocks the next scale down | ✅ |
+| C12 | `behavior.scaleUp.policies` rate limits | Step size respected | ✅ |
 | C13 | Autoscaler target missing | `degraded`, no crash | ✅ |
 | C14 | Autoscaler `enabled: false` | `suspended`, target untouched | ✅ |
-| C15 | No metric value available | `pending`, target untouched | 🔶 |
+| C15 | No metric value available | `pending`, target untouched | ✅ |
 | C16 | Scaled replica count reaches the Deployment | Deployment follows `spec.replicas` | ✅ |
 | C17 | All three autoscaler kinds scale their target | Model, HarnessRuntime, ToolServer | ✅ |
 | C18 | `utilization` metric from `metrics.k8s.io` | Reads real pod CPU/memory | ⬜ |
-| C19 | Manual `kubectl scale` while an autoscaler owns the target | Autoscaler reasserts on next reconcile | ⬜ |
+| C19 | Manual `kubectl scale` while an autoscaler owns the target | Autoscaler reasserts on next reconcile | ✅ |
 | C20 | Two autoscalers on one target | Documented behaviour, ideally rejected | ⬜ |
 
 ---
@@ -154,16 +154,16 @@ Does the controller build the right thing, own it, and say so?
 | ID | Case | Expected | |
 |---|---|---|---|
 | D1 | Per-unit pricing | `currentCost` = usage / perUnits × unitPrice | ✅ |
-| D2 | Tiered pricing | Correct cost across tier boundaries | ⬜ |
-| D3 | Flat pricing | Fixed cost | ⬜ |
-| D4 | No pricing block | Usage reported, cost absent | ⬜ |
+| D2 | Tiered pricing | Correct cost across tier boundaries | ✅ |
+| D3 | Flat pricing | Fixed cost | ✅ |
+| D4 | No pricing block | Usage reported, cost absent | ✅ |
 | D5 | Budget under limit | `budgetUsedPercent`, `budgetExceeded: false` | ✅ |
 | D6 | Budget exceeded | `budgetExceeded: true` + `BudgetExceeded` event | ✅ |
-| D7 | Alert thresholds crossed | `BudgetThreshold` event per threshold | ⬜ |
-| D8 | `limitType: usage` rather than cost | Budget measured in units | ⬜ |
-| D9 | Meter with no metric value | `pending`, no false zero | 🔶 |
+| D7 | Alert thresholds crossed | `BudgetThreshold` event per threshold | ✅ |
+| D8 | `limitType: usage` rather than cost | Budget measured in units | ✅ |
+| D9 | Meter with no metric value | `pending`, no false zero | ✅ |
 | D10 | Meter `enabled: false` | `suspended` | ⬜ |
-| D11 | Usage attributed across `dimensions` | Per-tenant breakdown | ⬜ (not implemented) |
+| D11 | Usage attributed across `dimensions` | Per-tenant breakdown | ✅ |
 | D12 | Cost across a month-long window | Correct accumulation | ⬜ |
 
 ---
@@ -174,14 +174,14 @@ Does the controller build the right thing, own it, and say so?
 |---|---|---|---|
 | E1 | Condition met | `triggered: true` + `GuardrailTripped` event | ✅ |
 | E2 | Condition not met | `triggered: false` | ✅ |
-| E3 | Trip then clear | `GuardrailCleared` event, no event storm | 🔶 |
-| E4 | `all` conditions, one false | Not triggered | ⬜ |
-| E5 | `any` conditions, one true | Triggered | ⬜ |
-| E6 | Missing metric value | `pending`, not a false negative | ⬜ |
+| E3 | Trip then clear | `GuardrailCleared` event, no event storm | ✅ |
+| E4 | `all` conditions, one false | Not triggered | ✅ |
+| E5 | `any` conditions, one true | Triggered | ✅ |
+| E6 | Missing metric value | `pending`, not a false negative | ✅ |
 | E7 | `status: disabled` | `inactive`, never evaluates | ✅ |
-| E8 | Each operator: gt, gte, lt, lte, eq, neq | Correct comparison | ⬜ |
+| E8 | Each operator: gt, gte, lt, lte, eq, neq | Correct comparison | ✅ |
 | E9 | Observations recorded in status | Metric, observed, threshold, operator | ✅ |
-| E10 | Cooldown between firings | Respected | ⬜ (not implemented) |
+| E10 | Cooldown between firings | Respected | ✅ |
 
 ---
 
@@ -196,7 +196,7 @@ Does the controller build the right thing, own it, and say so?
 | F5 | camelCase credential names (`apiKey`, `clientSecret`) | Detected | ✅ (unit) |
 | F6 | Non-credentials (`stateKey`, `totalTokens`) | Not extracted | ✅ (unit) |
 | F7 | Gateway `apiKey` in a CRD object | Never written into the generated ConfigMap | ✅ |
-| F8 | Controller RBAC is sufficient | No permission errors across a full reconcile | 🔶 (runs as admin in tests) |
+| F8 | Controller RBAC is sufficient | No permission errors across a full reconcile | ✅ |
 | F9 | Controller RBAC is minimal | Cannot touch unrelated resources | ⬜ |
 | F10 | Agent ServiceAccount can read tool catalogs | Discovery works under the granted Role | ⬜ |
 | F11 | Secret rotation | Updated value picked up | ⬜ |
@@ -209,21 +209,21 @@ Does the controller build the right thing, own it, and say so?
 | ID | Case | Expected | |
 |---|---|---|---|
 | G1 | `enabled: false` on ToolServer | `suspended`, Deployment removed | ✅ |
-| G2 | Re-enable | Deployment recreated | 🔶 |
+| G2 | Re-enable | Deployment recreated | ✅ |
 | G3 | TrainLoop `paused` / `stopped` | `suspended` | ✅ |
 | G4 | AIMetric `inactive` | `inactive`, no rule published | ✅ |
-| G5 | Update an image | Deployment rolls | ⬜ |
-| G6 | Update endpoints | Service ports change | ⬜ |
-| G7 | Delete a CR | Children removed | 🔶 |
-| G8 | Delete a child by hand | Controller recreates it | ⬜ |
-| G9 | Edit a child by hand | Controller reverts the drift | ⬜ |
-| G10 | Controller restart mid-reconcile | Converges, no duplicates | ⬜ |
+| G5 | Update an image | Deployment rolls | ✅ |
+| G6 | Update endpoints | Service ports change | ✅ |
+| G7 | Delete a CR | Children removed | ✅ |
+| G8 | Delete a child by hand | Controller recreates it | ✅ |
+| G9 | Edit a child by hand | Controller reverts the drift | ✅ |
+| G10 | Controller restart mid-reconcile | Converges, no duplicates | ✅ |
 | G11 | Controller offline for an hour | Catches up on resync | ⬜ |
-| G12 | Watch connection dropped | Reconnects, no missed changes | ⬜ |
+| G12 | Watch connection dropped | Reconnects, no missed changes | ✅ |
 | G13 | API server briefly unavailable | Retries, no crash loop | ⬜ |
 | G14 | CRD uninstalled while objects exist | Controller logs and continues | 🔶 |
 | G15 | Reconciler raises on one object | Others still reconcile, `failed` status written | 🔶 |
-| G16 | Two controller replicas | Documented as unsupported; ideally leader election | ⬜ |
+| G16 | Two controller replicas | Lease-based leader election; the standby stays idle | ✅ |
 | G17 | Namespace deleted underneath | No orphaned work, no crash | ⬜ |
 
 ---
@@ -299,10 +299,19 @@ Nothing here runs a real model yet; every image in the suite is `busybox`.
 
 ## Priorities
 
-If I were picking the next five to automate, in order:
+The first sweep is done: drift correction, the watch loop, leader election, scale-down and
+clamping, rate-limit policies, every pricing model, every guardrail operator and the
+Dataset connector variants are all automated now, and closing them surfaced four real bugs
+(scale-to-zero could not reach zero, could not wake from zero, and the `fs` and `database`
+connectors read fields that did not exist).
 
-1. **G8/G9 — drift correction.** A controller that does not fix hand-edited children is not a controller. This is the largest gap in the current suite.
-2. **H1 — the ship-an-agent path.** Gateway, harness and tool server together, with a request actually flowing. It is the scenario the whole project exists for.
-3. **G10/G12 — restart and watch resilience.** The suite drives `run_once()`, so the watch loop and worker threads are entirely untested.
-4. **C2/C6/C7 — scale-down and clamping.** Scale-up is well covered; the other direction is not, and that is where a bad decision costs money.
-5. **B31 — every Dataset connector type.** Nine variants, one tested.
+What is left, in the order I would take it:
+
+1. **H1 / K1–K3 — a real request end to end.** Every image in the suite is `busybox`.
+   Nothing yet proves a real agent calls a real tool through a real gateway.
+2. **G11/G13 — controller offline and API-server flapping.** The watch loop is tested;
+   its behaviour under a broken API server is not.
+3. **I1–I6 — scale.** No test runs more than about forty objects.
+4. **F9/F10 — RBAC minimality.** The suite runs the controller as cluster-admin, so the
+   ClusterRole in `deploy/` is asserted by inspection, not by use.
+5. **J1/J8 — other Kubernetes versions and distributions.** kind only, one version.

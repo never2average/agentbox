@@ -12,6 +12,7 @@ Two backends, tried in order:
 Resource metrics (cpu, memory, gpu) fall back to the metrics.k8s.io API.
 """
 import json
+import re
 import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional
@@ -49,6 +50,69 @@ class MetricSource:
             if found is not None:
                 return found
         return self._from_config_map(name, namespace)
+
+    def values_by_dimension(self, name: str, namespace: str,
+                            dimensions: list) -> Dict[str, float]:
+        """
+        Break a metric down by the dimensions a meter attributes usage to.
+
+        Prometheus is queried with `sum by (dimensions) (metric)`. The ConfigMap
+        backend uses keys of the form `metric.dimension.value`, since ConfigMap
+        keys allow only alphanumerics, dashes, underscores and dots.
+
+        Args:
+            name: AIMetric name
+            namespace: Namespace to look in
+            dimensions: Dimension names to break down by
+
+        Returns:
+            Mapping of dimension-value label to value; empty when unavailable
+        """
+        if not dimensions:
+            return {}
+
+        if self.ctx.prometheus_url:
+            found = self._prometheus_by_dimension(name, dimensions)
+            if found:
+                return found
+
+        try:
+            cm = self.ctx.core.read_namespaced_config_map(METRICS_CONFIG_MAP, namespace)
+        except client.exceptions.ApiException:
+            return {}
+
+        breakdown = {}
+        for key, raw in (cm.data or {}).items():
+            match = re.match(rf"^{re.escape(name)}\.([^.]+)\.(.+)$", key)
+            if not match or match.group(1) not in dimensions:
+                continue
+            try:
+                breakdown[f"{match.group(1)}={match.group(2)}"] = float(raw)
+            except ValueError:
+                continue
+        return breakdown
+
+    def _prometheus_by_dimension(self, name: str, dimensions: list) -> Dict[str, float]:
+        """Query Prometheus for a metric grouped by dimensions."""
+        by = ",".join(dimensions)
+        query = urllib.parse.quote(f"sum by ({by}) ({name})")
+        url = f"{self.ctx.prometheus_url.rstrip('/')}/api/v1/query?query={query}"
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                payload = json.loads(response.read())
+        except Exception as e:  # noqa: BLE001
+            logger.debug("prometheus breakdown for %s failed: %s", name, e)
+            return {}
+
+        breakdown = {}
+        for result in payload.get("data", {}).get("result", []):
+            labels = result.get("metric", {})
+            key = ",".join(f"{d}={labels.get(d, '')}" for d in dimensions)
+            try:
+                breakdown[key] = float(result["value"][1])
+            except (KeyError, IndexError, ValueError):
+                continue
+        return breakdown
 
     def resource_value(self, resource: str, namespace: str, selector: str) -> Optional[float]:
         """

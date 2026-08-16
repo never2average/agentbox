@@ -214,7 +214,7 @@ spec:
       statistic: Sum
     subjects: [openai-compatible]
   attribution:
-    dimensions: [tenantId]
+    dimensions: [tenant_id]
   window:
     type: billingPeriod
     period: monthly

@@ -3,6 +3,7 @@ Governance and Observability Reconcilers
 AgentIdP, Guardrail, AIMetric, AIMeter and Tracer.
 """
 import json
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from kubernetes import client
@@ -10,6 +11,17 @@ from kubernetes import client
 from controller import children, status
 from controller.context import Context, logger
 from controller.metrics import MetricSource
+
+def _seconds_since(timestamp: Optional[str]) -> Optional[float]:
+    """Seconds elapsed since an RFC 3339 timestamp, or None if unreadable."""
+    if not timestamp:
+        return None
+    try:
+        previous = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return (datetime.now(timezone.utc) - previous).total_seconds()
+
 
 OPERATORS = {
     "gt": lambda a, b: a > b,
@@ -142,7 +154,8 @@ def reconcile_ai_meter(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]
                             [status.condition(status.READY, False, "Disabled")])
 
     usage = spec["usage"]
-    observed = MetricSource(ctx).value(usage["source"]["metric"], namespace)
+    source = MetricSource(ctx)
+    observed = source.value(usage["source"]["metric"], namespace)
     if observed is None:
         return status.build(
             resource, "pending",
@@ -168,6 +181,15 @@ def reconcile_ai_meter(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]
                 cost += (remaining / per_units) * pricing["unitPrice"]
         elif pricing.get("unitPrice") is not None:
             cost = (observed / per_units) * pricing["unitPrice"]
+
+    dimensions = spec.get("attribution", {}).get("dimensions", [])
+    breakdown = []
+    for label, amount in sorted(source.values_by_dimension(
+            usage["source"]["metric"], namespace, dimensions).items()):
+        entry = {"dimensions": label, "usage": amount}
+        if pricing.get("unitPrice") is not None and pricing.get("model") != "tiered":
+            entry["cost"] = (amount / pricing.get("perUnits", 1)) * pricing["unitPrice"]
+        breakdown.append(entry)
 
     budget = spec.get("budget", {})
     limit = budget.get("limit")
@@ -201,6 +223,7 @@ def reconcile_ai_meter(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]
         unit=usage["unit"], currentUsage=observed, currentCost=cost,
         budgetUsedPercent=used_percent,
         budgetExceeded=exceeded,
+        attributedUsage=breakdown or None,
         window=spec["window"].get("period") or spec["window"].get("type"))
 
 
@@ -258,23 +281,50 @@ def reconcile_guardrail(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any
         tripped = tripped or any(r for r in any_results if r is not None)
 
     effect = spec.get("effect", {})
-    was_tripped = (resource.get("status") or {}).get("triggered", False)
+    previous = resource.get("status") or {}
+    was_tripped = previous.get("triggered", False)
+    last_fired = previous.get("lastFiredTime")
+    since_fired = _seconds_since(last_fired)
 
-    if tripped and not was_tripped:
+    # suppressForSeconds keeps a guardrail quiet after it fires, so a flapping
+    # metric does not produce a stream of trips
+    suppress_for = spec.get("suppressForSeconds")
+    suppressed = bool(suppress_for and since_fired is not None and since_fired < suppress_for)
+
+    # cooldownSeconds is the minimum gap between two firings
+    cooldown = spec.get("cooldownSeconds")
+    in_cooldown = bool(cooldown and since_fired is not None and since_fired < cooldown)
+
+    fired_now = tripped and not was_tripped and not in_cooldown and not suppressed
+
+    if fired_now:
         ctx.event(resource, "GuardrailTripped",
                   f"conditions met; effect={effect.get('type')}", "Warning")
+        last_fired = status.now()
     elif was_tripped and not tripped:
         ctx.event(resource, "GuardrailCleared", "conditions no longer met")
 
+    if suppressed:
+        message = f"suppressed for another {int(suppress_for - since_fired)}s after firing"
+    elif tripped and in_cooldown:
+        message = f"conditions met, in cooldown for another {int(cooldown - since_fired)}s"
+    elif tripped:
+        message = f"tripped: effect {effect.get('type')}"
+    else:
+        message = "conditions not met"
+
     return status.build(
-        resource, "active",
-        f"tripped: effect {effect.get('type')}" if tripped else "conditions not met",
+        resource, "active", message,
         [status.condition(status.READY, True, "Evaluated"),
-         status.condition(status.TRIGGERED, tripped,
+         status.condition(status.TRIGGERED, tripped and not suppressed,
                           "ConditionsMet" if tripped else "ConditionsNotMet")],
-        triggered=tripped,
+        triggered=tripped and not suppressed,
+        conditionsMet=tripped,
+        suppressed=suppressed,
+        inCooldown=in_cooldown,
         effect=effect.get("type"),
         observations=observations,
+        lastFiredTime=last_fired,
         lastEvaluationTime=status.now())
 
 

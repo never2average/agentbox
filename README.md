@@ -156,8 +156,10 @@ Full reference with every field: **[docs/crd-reference.md](docs/crd-reference.md
 | `Tracer` | Where traces and logs are exported, in OpenTelemetry shape |
 | `Recipe` | A composable multi-stage pipeline definition |
 
-Three of these carry Kubernetes workloads — `HarnessRuntime`, `ToolServer`, `TrainLoop`.
-The other thirteen are configuration.
+`HarnessRuntime`, `ToolServer` and `TrainLoop` always carry Kubernetes workloads; `Model`
+and `Gateway` do when you give them a `serving` block, and `Evaluator` does when you ask
+for a run. The rest reconcile into configuration their consumers read, or into decisions
+written back to status.
 
 ## Quickstart
 
@@ -235,10 +237,10 @@ Honest state of the world, so nobody is surprised:
 | ✅ | **Autoscaling that works**, on the HorizontalPodAutoscaler formula with a tolerance band, stabilization windows and scale-to-zero |
 | ✅ | **Metering that computes** — flat, per-unit and tiered pricing, budget thresholds, breach events |
 | ✅ | **Python CRUD layer** for every kind, for clusters where you cannot install CRDs |
-| ✅ | **Verified end to end** against a live API server — 173 assertions ([`tests/e2e_test.py`](tests/e2e_test.py)) |
+| ✅ | **Verified end to end** against a live API server — 233 assertions ([`tests/e2e_test.py`](tests/e2e_test.py)) |
 | 🚧 | **No admission webhook.** Validation happens at the API server via the CRD schemas and CEL rules, not through defaulting/mutating webhooks |
 | 🚧 | **Guardrail effects are reported, not enforced.** The controller decides whether a guardrail trips and says so in status and events; the gateway or harness still has to act on it |
-| 🚧 | **The controller is single-replica.** No leader election yet, so do not run two |
+| ✅ | **Leader election**, so a second replica stands by rather than fighting the first |
 
 `v1beta1` is where the field names settle. I will not rename fields under you from here
 without a version bump.

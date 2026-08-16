@@ -1080,6 +1080,561 @@ def test_metric_source_prometheus(context, namespace, kubeconfig):
     return ok
 
 
+
+# --------------------------------------------------------------------------- 9
+def test_controller_drift(context, namespace, kubeconfig):
+    """A controller that does not correct drift is not a controller."""
+    ok = True
+    _run_controller(kubeconfig, namespace)
+
+    # delete a child by hand
+    kubectl("delete", "service", "api-harness", "-n", namespace, context=context)
+    _run_controller(kubeconfig, namespace)
+    code, _, err = kubectl("get", "service", "api-harness", "-n", namespace,
+                           context=context, check=False)
+    ok &= record("a deleted Service is recreated", PASS if code == 0 else FAIL,
+                 err.strip()[:140])
+
+    kubectl("delete", "deployment", "api-harness", "-n", namespace, context=context)
+    wait_gone("deployment", "api-harness", context, namespace, 60)
+    _run_controller(kubeconfig, namespace)
+    code, _, err = kubectl("get", "deployment", "api-harness", "-n", namespace,
+                           context=context, check=False)
+    ok &= record("a deleted Deployment is recreated", PASS if code == 0 else FAIL,
+                 err.strip()[:140])
+
+    # edit a child by hand
+    kubectl("set", "image", "deployment/api-harness", "api-harness=nginx:1.27",
+            "-n", namespace, context=context)
+    _run_controller(kubeconfig, namespace)
+    _, out, _ = kubectl("get", "deployment", "api-harness", "-n", namespace,
+                        "-o", "jsonpath={.spec.template.spec.containers[0].image}",
+                        context=context)
+    ok &= record("a hand-edited image is reverted to the spec",
+                 PASS if out.strip() == "acme/support-agent:1.4.0" else FAIL, out.strip())
+
+    kubectl("patch", "configmap", "summarize-text-tools", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"data": {"catalog.json": "{}"}}), context=context)
+    _run_controller(kubeconfig, namespace)
+    _, out, _ = kubectl("get", "configmap", "summarize-text-tools", "-n", namespace,
+                        "-o", "jsonpath={.data.catalog\\.json}", context=context)
+    ok &= record("a hand-edited ConfigMap is rewritten",
+                 PASS if "summarize-text" in out else FAIL, out[:100])
+
+    # the spec is the source of truth for replicas too
+    kubectl("scale", "deployment/api-harness", "--replicas=99", "-n", namespace,
+            context=context)
+    _run_controller(kubeconfig, namespace)
+    _, out, _ = kubectl("get", "deployment", "api-harness", "-n", namespace,
+                        "-o", "jsonpath={.spec.replicas}", context=context)
+    declared = _spec_replicas(context, namespace, "harnessruntimes", "api-harness")
+    ok &= record("a hand-scaled Deployment is reset to the declared count",
+                 PASS if out.strip() == str(declared) else FAIL,
+                 f"deployment={out.strip()} declared={declared}")
+    return ok
+
+
+def test_controller_updates(context, namespace, kubeconfig):
+    """Editing a spec rolls the workload."""
+    ok = True
+    kubectl("patch", "harnessruntimes", "api-harness", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"code": {"image": "acme/support-agent:2.0.0"}}}),
+            context=context)
+    _run_controller(kubeconfig, namespace)
+    _, out, _ = kubectl("get", "deployment", "api-harness", "-n", namespace,
+                        "-o", "jsonpath={.spec.template.spec.containers[0].image}",
+                        context=context)
+    ok &= record("updating the image rolls the Deployment",
+                 PASS if out.strip() == "acme/support-agent:2.0.0" else FAIL, out.strip())
+
+    kubectl("patch", "harnessruntimes", "api-harness", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"endpoints": [
+                {"name": "api", "port": 9090, "path": "/api"}]}}), context=context)
+    _run_controller(kubeconfig, namespace)
+    _, out, _ = kubectl("get", "service", "api-harness", "-n", namespace,
+                        "-o", "jsonpath={.spec.ports[0].port}", context=context)
+    ok &= record("changing an endpoint updates the Service port",
+                 PASS if out.strip() == "9090" else FAIL, out.strip())
+
+    kubectl("patch", "harnessruntimes", "api-harness", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"env": {"ROLLED": "yes"}}}), context=context)
+    _run_controller(kubeconfig, namespace)
+    _, out, _ = kubectl("get", "deployment", "api-harness", "-n", namespace,
+                        "-o", "jsonpath={.spec.template.spec.containers[0].env}",
+                        context=context)
+    ok &= record("env changes reach the container", PASS if "ROLLED" in out else FAIL, out[:120])
+
+    # observedGeneration tracks the spec
+    _, out, _ = kubectl("get", "harnessruntimes", "api-harness", "-n", namespace,
+                        "-o", "json", context=context)
+    doc = json.loads(out)
+    ok &= record("observedGeneration tracks metadata.generation",
+                 PASS if doc["status"].get("observedGeneration") == doc["metadata"]["generation"]
+                 else FAIL,
+                 f"observed={doc['status'].get('observedGeneration')} "
+                 f"generation={doc['metadata']['generation']}")
+
+    # restore
+    kubectl("patch", "harnessruntimes", "api-harness", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"code": {"image": "acme/support-agent:1.4.0"},
+                                       "endpoints": [{"name": "api", "port": 8080,
+                                                      "path": "/api"}]}}), context=context)
+    _run_controller(kubeconfig, namespace)
+    return ok
+
+
+def test_controller_garbage_collection(context, namespace, kubeconfig):
+    """Deleting an AgentBox object removes everything it owns."""
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "ToolServer",
+           "metadata": {"name": "doomed-tools"},
+           "spec": {"code": {"image": "busybox:1.36"}, "endpoint": {"port": 8080},
+                    "tools": [{"name": "noop", "parameters": {"type": "object"},
+                               "returns": {"type": "object"}}]}},
+          context, namespace)
+    _run_controller(kubeconfig, namespace)
+
+    ok = True
+    for resource in ("deployment", "service", "configmap"):
+        name = "doomed-tools-tools" if resource == "configmap" else "doomed-tools"
+        code, _, _ = kubectl("get", resource, name, "-n", namespace, context=context, check=False)
+        ok &= record(f"doomed ToolServer has a {resource}", PASS if code == 0 else FAIL)
+
+    kubectl("delete", "toolserver", "doomed-tools", "-n", namespace, context=context)
+    for resource in ("deployment", "service", "configmap"):
+        name = "doomed-tools-tools" if resource == "configmap" else "doomed-tools"
+        ok &= record(f"garbage collection removes the {resource}",
+                     PASS if wait_gone(resource, name, context, namespace, 90) else FAIL)
+    return ok
+
+
+def test_controller_watch_loop(context, namespace, kubeconfig):
+    """The watch loop and worker threads, not just run_once()."""
+    sys.path.insert(0, str(ROOT))
+    from controller.context import Context
+    from controller.manager import Manager
+    import threading
+
+    manager = Manager(Context(kubeconfig=kubeconfig, namespace=namespace),
+                      resync_seconds=5, workers=2)
+    thread = threading.Thread(target=manager.run, daemon=True)
+    thread.start()
+    time.sleep(3)
+
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Dataset",
+           "metadata": {"name": "watched-dataset"},
+           "spec": {"name": "watched", "type": "fs", "direction": "source", "enabled": True,
+                    "config": {"fs": {"basePath": "/data"}}}},
+          context, namespace)
+
+    deadline = time.time() + 60
+    reconciled = False
+    while time.time() < deadline:
+        code, out, _ = kubectl("get", "datasets", "watched-dataset", "-n", namespace,
+                               "-o", "json", context=context, check=False)
+        if code == 0 and json.loads(out).get("status", {}).get("state") == "active":
+            reconciled = True
+            break
+        time.sleep(2)
+
+    ok = record("the watch loop reconciles a newly created object",
+                PASS if reconciled else FAIL, "no status within 60s")
+
+    # an edit is picked up too
+    kubectl("patch", "datasets", "watched-dataset", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"enabled": False}}), context=context)
+    deadline = time.time() + 60
+    suspended = False
+    while time.time() < deadline:
+        _, out, _ = kubectl("get", "datasets", "watched-dataset", "-n", namespace,
+                            "-o", "json", context=context)
+        if json.loads(out).get("status", {}).get("state") == "suspended":
+            suspended = True
+            break
+        time.sleep(2)
+    ok &= record("the watch loop picks up an edit",
+                 PASS if suspended else FAIL, "state did not change within 60s")
+
+    manager.stop.set()
+    thread.join(timeout=10)
+    ok &= record("the controller shuts down cleanly",
+                 PASS if not thread.is_alive() else FAIL, "run() did not return")
+    ok &= record("the watch loop recorded no failures",
+                 PASS if manager.failures == 0 else FAIL, f"{manager.failures} failures")
+    return ok
+
+
+def test_leader_election(context, namespace, kubeconfig):
+    """Two replicas: one leads, the other stands by."""
+    sys.path.insert(0, str(ROOT))
+    from controller.context import Context
+    from controller.leader import LeaderElector
+
+    ctx = Context(kubeconfig=kubeconfig, namespace=namespace)
+    first = LeaderElector(ctx, namespace=namespace, identity="replica-a")
+    second = LeaderElector(ctx, namespace=namespace, identity="replica-b")
+
+    ok = record("the first replica acquires the lease",
+                PASS if first.try_acquire() else FAIL)
+    ok &= record("the second replica does not",
+                 PASS if not second.try_acquire() else FAIL)
+    ok &= record("the holder can renew", PASS if first.try_acquire() else FAIL)
+
+    first.is_leader.set()
+    first.release()
+    ok &= record("a released lease is taken by the standby",
+                 PASS if second.try_acquire() else FAIL)
+
+    kubectl("delete", "lease", "agentbox-controller", "-n", namespace,
+            context=context, check=False)
+    return ok
+
+
+def test_scaling_policies(context, namespace, kubeconfig):
+    """Rate-limit policies cap how fast a target moves."""
+    ok = True
+    kubectl("patch", "harnessswarmautoscalers", "api-harness-swarm", "-n", namespace,
+            "--type=merge", "-p", json.dumps({"spec": {
+                "bounds": {"minReplicas": 1, "maxReplicas": 50},
+                "behavior": {"scaleUp": {"stabilizationWindowSeconds": 0,
+                                         "policies": [{"type": "pods", "value": 2,
+                                                       "periodSeconds": 1}]},
+                             "scaleDown": {"stabilizationWindowSeconds": 0,
+                                           "selectPolicy": "disabled"}}}}),
+            context=context)
+    kubectl("patch", "harnessruntimes", "api-harness", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"replicas": 2}}), context=context)
+    _pin_metrics(context, namespace, {"pending-agent-sessions": 50})
+    _run_controller(kubeconfig, namespace)
+
+    replicas = _spec_replicas(context, namespace, "harnessruntimes", "api-harness")
+    ok &= record("a pods policy caps one scale-up step at +2",
+                 PASS if replicas == 4 else FAIL, f"replicas={replicas}")
+
+    # the policy period gates the next change, so a pass inside it must not move
+    _run_controller(kubeconfig, namespace)
+    gated = _spec_replicas(context, namespace, "harnessruntimes", "api-harness")
+    swarm = _status_of(context, namespace, "harnessswarmautoscalers", "api-harness-swarm")
+    ok &= record("a pass inside the policy period does not move the target",
+                 PASS if gated == 4 and "policy period" in swarm.get("message", "") else FAIL,
+                 f"replicas={gated}: {swarm.get('message')}")
+
+    time.sleep(2)
+    _run_controller(kubeconfig, namespace)
+    ok &= record("the next pass after the period steps by 2 again",
+                 PASS if _spec_replicas(context, namespace, "harnessruntimes",
+                                        "api-harness") == 6 else FAIL,
+                 str(_spec_replicas(context, namespace, "harnessruntimes", "api-harness")))
+
+    _pin_metrics(context, namespace, {"pending-agent-sessions": 0})
+    time.sleep(2)
+    _run_controller(kubeconfig, namespace)
+    held = _spec_replicas(context, namespace, "harnessruntimes", "api-harness")
+    swarm = _status_of(context, namespace, "harnessswarmautoscalers", "api-harness-swarm")
+    ok &= record("selectPolicy disabled blocks scale-down entirely",
+                 PASS if held == 6 and "disabled" in swarm.get("message", "") else FAIL,
+                 f"replicas={held}: {swarm.get('message')}")
+
+    # percent policy
+    kubectl("patch", "harnessswarmautoscalers", "api-harness-swarm", "-n", namespace,
+            "--type=merge", "-p", json.dumps({"spec": {"behavior": {
+                "scaleUp": {"stabilizationWindowSeconds": 0,
+                            "policies": [{"type": "percent", "value": 50,
+                                          "periodSeconds": 1}]},
+                "scaleDown": {"selectPolicy": "max"}}}}), context=context)
+    _pin_metrics(context, namespace, {"pending-agent-sessions": 50})
+    before = _spec_replicas(context, namespace, "harnessruntimes", "api-harness")
+    time.sleep(2)
+    _run_controller(kubeconfig, namespace)
+    after = _spec_replicas(context, namespace, "harnessruntimes", "api-harness")
+    ok &= record("a percent policy caps the step at +50%",
+                 PASS if after == int(before * 1.5) else FAIL, f"{before} -> {after}")
+    return ok
+
+
+def test_scaling_clamps(context, namespace, kubeconfig):
+    """Bounds hold in both directions, and conflicting metrics resolve to the max."""
+    ok = True
+    kubectl("patch", "modelautoscalers", "llama-3-70b-autoscaler", "-n", namespace,
+            "--type=merge", "-p", json.dumps({"spec": {
+                "enabled": True,
+                "bounds": {"minReplicas": 2, "maxReplicas": 5},
+                "behavior": {"scaleUp": {"stabilizationWindowSeconds": 0},
+                             "scaleDown": {"stabilizationWindowSeconds": 0}},
+                "metrics": [{"type": "aiMetric", "metric": "inference-queue-depth",
+                             "target": {"metricType": "averageValue", "value": 20}}]}}),
+            context=context)
+    kubectl("patch", "models", "llama-3-70b-instruct", "-n", namespace, "--type=merge",
+            "-p", json.dumps({"spec": {"replicas": 3}}), context=context)
+
+    _pin_metrics(context, namespace, {"inference-queue-depth": 500})
+    _run_controller(kubeconfig, namespace)
+    ok &= record("demand above maxReplicas clamps to the ceiling",
+                 PASS if _spec_replicas(context, namespace, "models",
+                                        "llama-3-70b-instruct") == 5 else FAIL)
+
+    _pin_metrics(context, namespace, {"inference-queue-depth": 1})
+    _run_controller(kubeconfig, namespace)
+    ok &= record("demand below minReplicas clamps to the floor",
+                 PASS if _spec_replicas(context, namespace, "models",
+                                        "llama-3-70b-instruct") == 2 else FAIL)
+
+    _pin_metrics(context, namespace, {"inference-queue-depth": 40, "quality-score": 1})
+    kubectl("patch", "modelautoscalers", "llama-3-70b-autoscaler", "-n", namespace,
+            "--type=merge", "-p", json.dumps({"spec": {"metrics": [
+                {"type": "aiMetric", "metric": "inference-queue-depth",
+                 "target": {"metricType": "averageValue", "value": 20}},
+                {"type": "aiMetric", "metric": "quality-score",
+                 "target": {"metricType": "averageValue", "value": 100}}]}}),
+            context=context)
+    _run_controller(kubeconfig, namespace)
+    ok &= record("conflicting metrics resolve to the highest demand",
+                 PASS if _spec_replicas(context, namespace, "models",
+                                        "llama-3-70b-instruct") == 4 else FAIL,
+                 str(_spec_replicas(context, namespace, "models", "llama-3-70b-instruct")))
+
+    _pin_metrics(context, namespace, {"nothing": 1})
+    before = _spec_replicas(context, namespace, "models", "llama-3-70b-instruct")
+    _run_controller(kubeconfig, namespace)
+    after = _spec_replicas(context, namespace, "models", "llama-3-70b-instruct")
+    autoscaler = _status_of(context, namespace, "modelautoscalers", "llama-3-70b-autoscaler")
+    ok &= record("no metric value leaves the target alone",
+                 PASS if before == after and autoscaler.get("state") == "pending" else FAIL,
+                 f"{before} -> {after}, state={autoscaler.get('state')}")
+    return ok
+
+
+def test_metering_pricing_models(context, namespace, kubeconfig):
+    """Flat, per-unit and tiered pricing, thresholds and attribution."""
+    ok = True
+
+    # tiered: 1.5e9 tokens over tiers at 1e9 (0.5) then the rest at 1.0 per 1e6
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "AIMeter",
+           "metadata": {"name": "tiered-meter"},
+           "spec": {"usage": {"unit": "totalTokens", "source": {"metric": "tiered-tokens"}},
+                    "window": {"type": "billingPeriod", "period": "monthly"},
+                    "pricing": {"currency": "USD", "model": "tiered", "perUnits": 1000000,
+                                "unitPrice": 1.0,
+                                "tiers": [{"upTo": 1000000000, "unitPrice": 0.5}]},
+                    "budget": {"limit": 2000, "limitType": "cost",
+                               "alertThresholdsPercent": [50, 80]}}},
+          context, namespace)
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "AIMeter",
+           "metadata": {"name": "usage-budget-meter"},
+           "spec": {"usage": {"unit": "requests", "source": {"metric": "request-count"}},
+                    "window": {"type": "tumbling", "durationSeconds": 3600},
+                    "budget": {"limit": 100, "limitType": "usage"}}},
+          context, namespace)
+    _pin_metrics(context, namespace, {
+        "tiered-tokens": 1_500_000_000,
+        "request-count": 150,
+        "gateway-tokens": 2_000_000_000,
+        "gateway-tokens.tenant_id.acme": 1_500_000_000,
+        "gateway-tokens.tenant_id.globex": 500_000_000,
+    })
+    _run_controller(kubeconfig, namespace)
+
+    tiered = _status_of(context, namespace, "aimeters", "tiered-meter")
+    ok &= record("tiered pricing charges each tier at its own rate (1000 USD)",
+                 PASS if tiered.get("currentCost") == 1000 else FAIL, json.dumps(tiered)[:180])
+
+    usage_budget = _status_of(context, namespace, "aimeters", "usage-budget-meter")
+    ok &= record("a usage-type budget measures units, not cost",
+                 PASS if usage_budget.get("budgetExceeded") is True
+                 and usage_budget.get("currentCost") is None else FAIL,
+                 json.dumps(usage_budget)[:180])
+
+    meter = _status_of(context, namespace, "aimeters", "tenant-token-spend")
+    attributed = meter.get("attributedUsage") or []
+    ok &= record("usage is attributed per dimension",
+                 PASS if len(attributed) == 2
+                 and any(a["dimensions"] == "tenant_id=acme" for a in attributed) else FAIL,
+                 json.dumps(attributed)[:200])
+
+    _, out, _ = kubectl("get", "events", "-n", namespace, "-o", "json", context=context)
+    reasons = {e["reason"] for e in json.loads(out)["items"]}
+    ok &= record("crossing an alert threshold emits BudgetThreshold",
+                 PASS if "BudgetThreshold" in reasons else FAIL, str(sorted(reasons)))
+    return ok
+
+
+def test_guardrail_logic(context, namespace, kubeconfig):
+    """Operators, all/any, cooldown and suppression."""
+    ok = True
+    for operator, threshold, observed, expected in [
+        ("gt", 100, 150, True), ("gt", 100, 50, False),
+        ("gte", 100, 100, True), ("lt", 100, 50, True),
+        ("lte", 100, 100, True), ("eq", 100, 100, True), ("neq", 100, 100, False),
+    ]:
+        name = f"op-{operator}-{observed}"
+        apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Guardrail",
+               "metadata": {"name": name},
+               "spec": {"name": name, "status": "enforce", "priority": 1,
+                        "conditions": {"all": [{"metric": "probe-metric",
+                                                "operator": operator, "threshold": threshold,
+                                                "statistic": "Average", "periodSeconds": 60}]},
+                        "effect": {"type": "throttle"}}},
+              context, namespace)
+        _pin_metrics(context, namespace, {"probe-metric": observed})
+        _run_controller(kubeconfig, namespace)
+        result = _status_of(context, namespace, "guardrails", name)
+        ok &= record(f"operator {operator}: {observed} vs {threshold} -> {expected}",
+                     PASS if result.get("triggered") is expected else FAIL,
+                     json.dumps(result)[:140])
+
+    # all: every condition must hold; any: one is enough
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Guardrail",
+           "metadata": {"name": "all-conditions"},
+           "spec": {"name": "all", "status": "enforce", "priority": 1,
+                    "conditions": {"all": [
+                        {"metric": "probe-metric", "operator": "gt", "threshold": 10,
+                         "statistic": "Average", "periodSeconds": 60},
+                        {"metric": "probe-metric", "operator": "gt", "threshold": 10000,
+                         "statistic": "Average", "periodSeconds": 60}]},
+                    "effect": {"type": "throttle"}}},
+          context, namespace)
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Guardrail",
+           "metadata": {"name": "any-conditions"},
+           "spec": {"name": "any", "status": "enforce", "priority": 1,
+                    "conditions": {"any": [
+                        {"metric": "probe-metric", "operator": "gt", "threshold": 10,
+                         "statistic": "Average", "periodSeconds": 60},
+                        {"metric": "probe-metric", "operator": "gt", "threshold": 10000,
+                         "statistic": "Average", "periodSeconds": 60}]},
+                    "effect": {"type": "throttle"}}},
+          context, namespace)
+    _pin_metrics(context, namespace, {"probe-metric": 100})
+    _run_controller(kubeconfig, namespace)
+    ok &= record("all: one false condition means not tripped",
+                 PASS if _status_of(context, namespace, "guardrails",
+                                    "all-conditions").get("triggered") is False else FAIL)
+    ok &= record("any: one true condition is enough",
+                 PASS if _status_of(context, namespace, "guardrails",
+                                    "any-conditions").get("triggered") is True else FAIL)
+
+    # a missing metric must not read as "not tripped"
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Guardrail",
+           "metadata": {"name": "no-metric-guardrail"},
+           "spec": {"name": "nm", "status": "enforce", "priority": 1,
+                    "conditions": {"all": [{"metric": "absent-metric", "operator": "gt",
+                                            "threshold": 1, "statistic": "Average",
+                                            "periodSeconds": 60}]},
+                    "effect": {"type": "deny"}}},
+          context, namespace)
+    _run_controller(kubeconfig, namespace)
+    ok &= record("a missing metric reports pending, not a false negative",
+                 PASS if _status_of(context, namespace, "guardrails",
+                                    "no-metric-guardrail").get("state") == "pending" else FAIL)
+
+    # suppression keeps a flapping guardrail quiet
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Guardrail",
+           "metadata": {"name": "suppressed-guardrail"},
+           "spec": {"name": "sup", "status": "enforce", "priority": 1,
+                    "suppressForSeconds": 3600,
+                    "conditions": {"all": [{"metric": "probe-metric", "operator": "gt",
+                                            "threshold": 10, "statistic": "Average",
+                                            "periodSeconds": 60}]},
+                    "effect": {"type": "throttle"}}},
+          context, namespace)
+    _run_controller(kubeconfig, namespace)
+    first = _status_of(context, namespace, "guardrails", "suppressed-guardrail")
+    _run_controller(kubeconfig, namespace)
+    second = _status_of(context, namespace, "guardrails", "suppressed-guardrail")
+    ok &= record("a guardrail fires once, then suppresses",
+                 PASS if first.get("triggered") is True and second.get("suppressed") is True
+                 else FAIL, f"{json.dumps(first)[:90]} then {json.dumps(second)[:90]}")
+    return ok
+
+
+def test_dataset_connectors(context, namespace, kubeconfig):
+    """Every connector variant publishes a usable address."""
+    variants = [
+        ("httpPoll", {"url": "https://api.example.com/orders", "method": "GET",
+                      "intervalSeconds": 60}, "https://api.example.com/orders"),
+        ("kafka", {"brokers": ["kafka-0:9092", "kafka-1:9092"],
+                   "topics": {"consume": ["events"]},
+                   "consumerGroup": "agentbox"}, "kafka-0:9092,kafka-1:9092"),
+        ("s3", {"bucket": "agent-artifacts", "prefix": "runs", "region": "us-east-1"},
+         "s3://agent-artifacts/runs"),
+        ("fs", {"basePath": "/mnt/data"}, "/mnt/data"),
+        ("database", {"driver": "postgres",
+                      "connection": {"host": "postgres.svc", "port": 5432,
+                                     "database": "agents"}}, "postgres.svc"),
+    ]
+    ok = True
+    for kind, config, expected in variants:
+        name = f"ds-{kind.lower()}"
+        code, _, err = apply(
+            {"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Dataset",
+             "metadata": {"name": name},
+             "spec": {"name": name, "type": kind, "direction": "source", "enabled": True,
+                      "config": {kind: config}}},
+            context, namespace, check=False)
+        if code != 0:
+            ok &= record(f"Dataset {kind} accepted", FAIL, err.strip().splitlines()[-1][:160])
+            continue
+        _run_controller(kubeconfig, namespace)
+        address = _status_of(context, namespace, "datasets", name).get("address")
+        ok &= record(f"Dataset {kind} resolves its address",
+                     PASS if address == expected else FAIL, f"{address} != {expected}")
+    return ok
+
+
+def test_api_edge_validation(context, namespace):
+    """Pattern and format rules the schemas promise."""
+    ok = True
+    cases = [
+        ("an invalid cron expression is rejected", {
+            "apiVersion": "ai.agentbox.io/v1beta1", "kind": "HarnessRuntime",
+            "metadata": {"name": "bad-cron-pattern"},
+            "spec": {"runtimeKind": "cron", "code": {"image": "busybox:1.36"},
+                     "schedule": {"cronExpression": "every tuesday please"}}}),
+        ("a non-DNS-1123 name is rejected", {
+            "apiVersion": "ai.agentbox.io/v1beta1", "kind": "Model",
+            "metadata": {"name": "Not_A_Valid_Name"},
+            "spec": {"modelName": "x", "modelHub": "huggingface", "hubModelId": "org/x"}}),
+        ("a malformed env var name is rejected", {
+            "apiVersion": "ai.agentbox.io/v1beta1", "kind": "HarnessRuntime",
+            "metadata": {"name": "bad-env"},
+            "spec": {"runtimeKind": "worker", "code": {"image": "busybox:1.36"},
+                     "env": {"not-a-valid-var": "x"}}}),
+        ("a tumbling window without a duration is rejected", {
+            "apiVersion": "ai.agentbox.io/v1beta1", "kind": "AIMeter",
+            "metadata": {"name": "bad-window"},
+            "spec": {"usage": {"unit": "requests", "source": {"metric": "m"}},
+                     "window": {"type": "tumbling"}}}),
+        ("tiered pricing without tiers is rejected", {
+            "apiVersion": "ai.agentbox.io/v1beta1", "kind": "AIMeter",
+            "metadata": {"name": "bad-tiers"},
+            "spec": {"usage": {"unit": "requests", "source": {"metric": "m"}},
+                     "window": {"type": "tumbling", "durationSeconds": 60},
+                     "pricing": {"model": "tiered", "unitPrice": 1}}}),
+        ("a wrong apiVersion is rejected", {
+            "apiVersion": "ai.agentbox.io/v1alpha1", "kind": "Model",
+            "metadata": {"name": "old-version"},
+            "spec": {"modelName": "x", "modelHub": "huggingface", "hubModelId": "org/x"}}),
+    ]
+    for label, doc in cases:
+        code, _, _ = apply(doc, context, namespace, check=False)
+        if code == 0:
+            kubectl("delete", doc["kind"].lower() + "s", doc["metadata"]["name"],
+                    "-n", namespace, context=context, check=False)
+        ok &= record(label, PASS if code != 0 else FAIL, "the API server accepted it")
+
+    # a worker harness needs no endpoint
+    code, _, err = apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "HarnessRuntime",
+                          "metadata": {"name": "worker-harness"},
+                          "spec": {"runtimeKind": "worker",
+                                   "code": {"image": "busybox:1.36"}}},
+                         context, namespace, check=False)
+    ok &= record("a worker harness without endpoints is accepted",
+                 PASS if code == 0 else FAIL, err.strip()[:140])
+
+    _, out, _ = kubectl("explain", "harnessruntime.spec.runtimeKind", context=context)
+    ok &= record("kubectl explain renders field descriptions",
+                 PASS if "Workload shape" in out else FAIL, out.strip()[:140])
+    return ok
+
+
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
@@ -1107,6 +1662,13 @@ def main():
         summarize()
         return 1
 
+    # a namespace still terminating from a previous run would swallow what we create
+    for _ in range(60):
+        code, _, _ = kubectl("get", "namespace", args.namespace,
+                             context=args.context, check=False)
+        if code != 0:
+            break
+        time.sleep(2)
     kubectl("create", "namespace", args.namespace, context=args.context, check=False)
 
     stages = [
@@ -1144,6 +1706,27 @@ def main():
         ("controller remaining status", test_controller_remaining_status,
          (args.context, args.namespace, args.kubeconfig)),
         ("metric source", test_metric_source_prometheus,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("api edge validation", test_api_edge_validation, (args.context, args.namespace)),
+        ("controller drift", test_controller_drift,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("controller updates", test_controller_updates,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("garbage collection", test_controller_garbage_collection,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("dataset connectors", test_dataset_connectors,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("scaling policies", test_scaling_policies,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("scaling clamps", test_scaling_clamps,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("metering pricing", test_metering_pricing_models,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("guardrail logic", test_guardrail_logic,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("leader election", test_leader_election,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("watch loop", test_controller_watch_loop,
          (args.context, args.namespace, args.kubeconfig)),
         ("controller idempotence", test_controller_idempotent,
          (args.context, args.namespace, args.kubeconfig)),

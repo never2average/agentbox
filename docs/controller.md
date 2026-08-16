@@ -30,8 +30,8 @@ kubectl -n agentbox-system logs -l app.kubernetes.io/name=agentbox-controller -f
 | `ToolServerAutoScaler` | Same, for a ToolServer | same |
 | `AgentIdP` | ServiceAccount + Role + RoleBinding | serviceAccount, role, guardrails |
 | `AIMetric` | Prometheus recording-rule ConfigMap | metricName, currentValue, ruleConfigMap |
-| `AIMeter` | Computes usage, cost and budget position | currentUsage, currentCost, budgetUsedPercent, budgetExceeded |
-| `Guardrail` | Evaluates conditions, emits events | triggered, effect, observations |
+| `AIMeter` | Computes usage, cost (flat, per-unit, tiered) and budget position, broken down by attribution dimensions | currentUsage, currentCost, attributedUsage, budgetUsedPercent, budgetExceeded |
+| `Guardrail` | Evaluates conditions, emits events, honours `cooldownSeconds` and `suppressForSeconds` | triggered, suppressed, inCooldown, observations |
 | `Tracer` | OpenTelemetry Collector config ConfigMap | collectorConfigMap, resourceAttributes |
 | `Dataset` | Connector config ConfigMap | connectorConfigMap, address, checkpointing |
 | `Recipe` | Topologically sorts stages, publishes the plan | resolvedOrder, stageCount, planConfigMap |
@@ -55,8 +55,13 @@ guardrail or autoscaler will do before you trust it with real traffic:
 ```bash
 kubectl -n agents create configmap agentbox-metrics \
   --from-literal=pending-agent-sessions=25 \
-  --from-literal=gateway-tokens=2000000000
+  --from-literal=gateway-tokens=2000000000 \
+  --from-literal=gateway-tokens.tenant_id.acme=1500000000
 ```
+
+A key of the form `metric.dimension.value` supplies the per-dimension breakdown an
+`AIMeter` attributes usage with; Prometheus supplies the same thing via
+`sum by (dimension) (metric)`.
 
 Resource metrics (`cpu`, `memory`) fall back to `metrics.k8s.io` when neither source has a
 value.
@@ -69,9 +74,12 @@ The HorizontalPodAutoscaler formula, deliberately:
 desired = ceil(currentReplicas × observed / target)
 ```
 
-with a **10% tolerance band** so a metric sitting near its target does not cause churn, and
-`spec.behavior.scaleUp/scaleDown.stabilizationWindowSeconds` to rate-limit changes. When
-several metrics disagree, the highest demand wins — the same rule HPA uses.
+with a **10% tolerance band** (`spec.tolerance`) so a metric sitting near its target does
+not cause churn. `stabilizationWindowSeconds` sets a quiet period after each change, and
+`policies` cap how far one step may move — `pods` for an absolute step, `percent` for a
+relative one, `periodSeconds` for the minimum gap between steps, and
+`selectPolicy: disabled` to block a direction entirely. When several metrics disagree, the
+highest demand wins — the same rule HPA uses.
 
 `scaleToZero.enabled` lets the floor drop to 0; otherwise `bounds.minReplicas` is clamped to
 at least 1. At zero replicas there is no per-replica average to reason about, so any demand
@@ -89,7 +97,13 @@ always see the decision in the object rather than only in the workload.
   which is where the request actually is.
 - **Move data.** A `Dataset` publishes its connector config; nothing in the controller reads
   from Kafka on your behalf.
-- **Leader-elect.** Run one replica.
+- **Enforce guardrail effects.** See above; the verdict is recorded, the action is not taken.
+
+## Running more than one
+
+`--leader-elect` takes a `coordination.k8s.io` Lease named `agentbox-controller`. Only the
+holder reconciles; a second replica waits, and takes over within about 15 seconds if the
+holder stops renewing. `deploy/` runs two replicas with the flag set.
 
 ## Running it
 

@@ -82,6 +82,7 @@ Scales a Model's replicas on queue depth, throughput or GPU utilisation.
 | `bounds` | `replicaBounds` | yes | Replica floor and ceiling. |
 | `metrics` | array&lt;`scalingMetric`&gt; | yes | Signals the scaling decision reads. Multiple metrics scale to the highest demand. |
 | `behavior` | `scalingBehavior` |  | Stabilisation windows and rate limits on scale up and scale down. |
+| `tolerance` | number |  | Relative deviation from target to ignore, so a metric hovering near its target does not cause churn. |
 | `placement` | object |  | Where new replicas may land. Node supply itself is delegated to the existing cluster autoscaler CRDs. |
 | `enabled` | boolean |  | Set false to pause scaling without deleting the autoscaler. |
 
@@ -148,6 +149,7 @@ Enforced by the API server as CEL validation rules:
 - schedule is required when runtimeKind is cron
 - a server harness must declare at least one endpoint
 - health.command is required when health.type is exec
+- env keys must be valid environment variable names
 
 ```yaml
 apiVersion: ai.agentbox.io/v1beta1
@@ -195,6 +197,7 @@ Scales a swarm of harnesses on session and queue pressure.
 | `bounds` | `replicaBounds` | yes | Replica floor and ceiling for the swarm. |
 | `metrics` | array&lt;`scalingMetric`&gt; | yes | Signals the scaling decision reads, typically pending sessions or queue depth. |
 | `behavior` | `scalingBehavior` |  | Stabilisation windows and rate limits on scale up and scale down. |
+| `tolerance` | number |  | Relative deviation from target to ignore, so a metric hovering near its target does not cause churn. |
 | `sessionAffinity` | object |  | How in-flight agent sessions are treated while the swarm resizes. |
 | `enabled` | boolean |  | Set false to pause scaling without deleting the autoscaler. |
 
@@ -297,6 +300,7 @@ Runs an image that serves tools over HTTP or gRPC, and publishes their contracts
 Enforced by the API server as CEL validation rules:
 
 - tool names must be unique within a tool server
+- env keys must be valid environment variable names
 
 ```yaml
 apiVersion: ai.agentbox.io/v1beta1
@@ -345,6 +349,7 @@ Scales a ToolServer on call rate, concurrency and latency.
 | `bounds` | `replicaBounds` | yes | Replica floor and ceiling for the tool server. |
 | `metrics` | array&lt;`scalingMetric`&gt; | yes | Signals the scaling decision reads, typically call rate or latency. |
 | `behavior` | `scalingBehavior` |  | Stabilisation windows and rate limits on scale up and scale down. |
+| `tolerance` | number |  | Relative deviation from target to ignore, so a metric hovering near its target does not cause churn. |
 | `concurrency` | object |  | Per-replica concurrency envelope used to derive the replica target. |
 | `enabled` | boolean |  | Set false to pause scaling without deleting the autoscaler. |
 

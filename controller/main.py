@@ -10,6 +10,7 @@ import argparse
 import sys
 
 from controller.context import Context, configure_logging, logger
+from controller.leader import LeaderElector
 from controller.manager import Manager
 
 
@@ -22,6 +23,9 @@ def main() -> int:
     parser.add_argument("--resync-seconds", type=int, default=60)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--once", action="store_true", help="reconcile everything once and exit")
+    parser.add_argument("--leader-elect", action="store_true",
+                        help="hold a Lease so extra replicas stay on standby")
+    parser.add_argument("--leader-elect-namespace", default="agentbox-system")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
@@ -29,7 +33,12 @@ def main() -> int:
 
     ctx = Context(kubeconfig=args.kubeconfig, namespace=args.namespace,
                   prometheus_url=args.prometheus_url)
-    manager = Manager(ctx, resync_seconds=args.resync_seconds, workers=args.workers)
+    elector = None
+    if args.leader_elect and not args.once:
+        elector = LeaderElector(ctx, namespace=args.leader_elect_namespace)
+
+    manager = Manager(ctx, resync_seconds=args.resync_seconds, workers=args.workers,
+                      elector=elector)
 
     if args.once:
         result = manager.run_once()

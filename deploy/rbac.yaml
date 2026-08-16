@@ -47,6 +47,10 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["roles", "rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
   # Metrics used by autoscalers, meters and guardrails
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods"]

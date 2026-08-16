@@ -86,6 +86,69 @@ def _observe(source: MetricSource, metric: Dict[str, Any], namespace: str,
     return None
 
 
+def _seconds_since(timestamp: Optional[str]) -> Optional[float]:
+    """Seconds elapsed since an RFC 3339 timestamp, or None if it cannot be read."""
+    if not timestamp:
+        return None
+    try:
+        previous = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return (datetime.now(timezone.utc) - previous).total_seconds()
+
+
+def _apply_policies(rules: Dict[str, Any], current: int, desired: int,
+                    elapsed: Optional[float]) -> Tuple[int, str]:
+    """
+    Rate-limit a scaling decision with spec.behavior.<direction>.policies.
+
+    A policy caps how much one scaling event may move: `pods` is an absolute
+    step, `percent` is relative to the current count. `selectPolicy` decides
+    which cap wins — `max` is the most permissive, `min` the most conservative,
+    `disabled` blocks movement in that direction entirely. `periodSeconds` is
+    the minimum interval between events under that policy.
+
+    Args:
+        rules: The scaleUp or scaleDown block
+        current: Current replica count
+        desired: Replica count the metrics argue for
+        elapsed: Seconds since the last scale, or None if there has not been one
+
+    Returns:
+        (allowed replica count, reason when the decision was limited)
+    """
+    if rules.get("selectPolicy") == "disabled":
+        return current, "scaling is disabled in this direction by selectPolicy"
+
+    policies = rules.get("policies")
+    if not policies:
+        return desired, ""
+
+    ready = [p for p in policies
+             if elapsed is None or elapsed >= p.get("periodSeconds", 0)]
+    if not ready:
+        soonest = min(p.get("periodSeconds", 0) for p in policies)
+        return current, (f"policy period: {int(soonest - (elapsed or 0))}s until the next "
+                         f"change is allowed")
+
+    caps = []
+    for policy in ready:
+        value = policy["value"]
+        if policy["type"] == "pods":
+            caps.append(value)
+        else:
+            caps.append(max(1, int(current * value / 100)))
+
+    cap = min(caps) if rules.get("selectPolicy") == "min" else max(caps)
+    delta = desired - current
+
+    if abs(delta) <= cap:
+        return desired, ""
+
+    limited = current + (cap if delta > 0 else -cap)
+    return limited, f"policy caps this change at {cap} replicas per event"
+
+
 def _within_stabilization(resource: Dict[str, Any], behavior: Dict[str, Any],
                           desired: int, current: int) -> Tuple[bool, str]:
     """
@@ -173,7 +236,19 @@ def reconcile_autoscaler(ctx: Context, resource: Dict[str, Any]) -> Dict[str, An
     lower = 0 if scale_to_zero.get("enabled") else max(floor, 1)
     desired = max(lower, min(ceiling, desired))
 
-    blocked, reason = _within_stabilization(resource, spec.get("behavior", {}), desired, current)
+    behavior = spec.get("behavior", {})
+    elapsed = _seconds_since((resource.get("status") or {}).get("lastScaleTime"))
+    if desired != current:
+        direction = behavior.get("scaleUp" if desired > current else "scaleDown", {})
+        desired, limit_reason = _apply_policies(direction, current, desired, elapsed)
+        if limit_reason and desired == current:
+            return status.build(
+                resource, "active", limit_reason,
+                [status.condition(status.READY, True, "RateLimited")],
+                currentReplicas=current, desiredReplicas=desired, metrics=observations,
+                lastScaleTime=(resource.get("status") or {}).get("lastScaleTime"))
+
+    blocked, reason = _within_stabilization(resource, behavior, desired, current)
     if blocked:
         return status.build(
             resource, "active", reason,
