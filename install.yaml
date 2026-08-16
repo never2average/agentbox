@@ -1257,10 +1257,44 @@ spec:
                             type: string
                           bearerToken:
                             type: string
-                            description: Bearer token (use secret:// ref in production)
+                            description: 'Deprecated: inline credentials are published into the connector
+                              ConfigMap. Use bearerTokenSecretRef.'
+                          bearerTokenSecretRef:
+                            type: object
+                            description: Secret supplying bearerToken. Referenced, never copied.
+                            required:
+                            - name
+                            - key
+                            properties:
+                              name:
+                                type: string
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                maxLength: 253
+                                description: Secret name.
+                              key:
+                                type: string
+                                pattern: ^[-._a-zA-Z0-9]+$
+                                description: Key within the Secret.
                           apiKey:
                             type: string
-                            description: API key (use secret:// ref in production)
+                            description: 'Deprecated: inline credentials are published into the connector
+                              ConfigMap. Use apiKeySecretRef.'
+                          apiKeySecretRef:
+                            type: object
+                            description: Secret supplying apiKey. Referenced, never copied.
+                            required:
+                            - name
+                            - key
+                            properties:
+                              name:
+                                type: string
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                maxLength: 253
+                                description: Secret name.
+                              key:
+                                type: string
+                                pattern: ^[-._a-zA-Z0-9]+$
+                                description: Key within the Secret.
                           apiKeyHeader:
                             type: string
                             default: X-API-Key
@@ -1362,10 +1396,44 @@ spec:
                             type: string
                           bearerToken:
                             type: string
-                            description: Bearer token (use secret:// ref in production)
+                            description: 'Deprecated: inline credentials are published into the connector
+                              ConfigMap. Use bearerTokenSecretRef.'
+                          bearerTokenSecretRef:
+                            type: object
+                            description: Secret supplying bearerToken. Referenced, never copied.
+                            required:
+                            - name
+                            - key
+                            properties:
+                              name:
+                                type: string
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                maxLength: 253
+                                description: Secret name.
+                              key:
+                                type: string
+                                pattern: ^[-._a-zA-Z0-9]+$
+                                description: Key within the Secret.
                           apiKey:
                             type: string
-                            description: API key (use secret:// ref in production)
+                            description: 'Deprecated: inline credentials are published into the connector
+                              ConfigMap. Use apiKeySecretRef.'
+                          apiKeySecretRef:
+                            type: object
+                            description: Secret supplying apiKey. Referenced, never copied.
+                            required:
+                            - name
+                            - key
+                            properties:
+                              name:
+                                type: string
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                maxLength: 253
+                                description: Secret name.
+                              key:
+                                type: string
+                                pattern: ^[-._a-zA-Z0-9]+$
+                                description: Key within the Secret.
                           apiKeyHeader:
                             type: string
                             default: X-API-Key
@@ -1653,10 +1721,44 @@ spec:
                             type: string
                           bearerToken:
                             type: string
-                            description: Bearer token (use secret:// ref in production)
+                            description: 'Deprecated: inline credentials are published into the connector
+                              ConfigMap. Use bearerTokenSecretRef.'
+                          bearerTokenSecretRef:
+                            type: object
+                            description: Secret supplying bearerToken. Referenced, never copied.
+                            required:
+                            - name
+                            - key
+                            properties:
+                              name:
+                                type: string
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                maxLength: 253
+                                description: Secret name.
+                              key:
+                                type: string
+                                pattern: ^[-._a-zA-Z0-9]+$
+                                description: Key within the Secret.
                           apiKey:
                             type: string
-                            description: API key (use secret:// ref in production)
+                            description: 'Deprecated: inline credentials are published into the connector
+                              ConfigMap. Use apiKeySecretRef.'
+                          apiKeySecretRef:
+                            type: object
+                            description: Secret supplying apiKey. Referenced, never copied.
+                            required:
+                            - name
+                            - key
+                            properties:
+                              name:
+                                type: string
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                maxLength: 253
+                                description: Secret name.
+                              key:
+                                type: string
+                                pattern: ^[-._a-zA-Z0-9]+$
+                                description: Key within the Secret.
                           apiKeyHeader:
                             type: string
                             default: X-API-Key
@@ -1784,10 +1886,44 @@ spec:
                             type: string
                           bearerToken:
                             type: string
-                            description: Bearer token (use secret:// ref in production)
+                            description: 'Deprecated: inline credentials are published into the connector
+                              ConfigMap. Use bearerTokenSecretRef.'
+                          bearerTokenSecretRef:
+                            type: object
+                            description: Secret supplying bearerToken. Referenced, never copied.
+                            required:
+                            - name
+                            - key
+                            properties:
+                              name:
+                                type: string
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                maxLength: 253
+                                description: Secret name.
+                              key:
+                                type: string
+                                pattern: ^[-._a-zA-Z0-9]+$
+                                description: Key within the Secret.
                           apiKey:
                             type: string
-                            description: API key (use secret:// ref in production)
+                            description: 'Deprecated: inline credentials are published into the connector
+                              ConfigMap. Use apiKeySecretRef.'
+                          apiKeySecretRef:
+                            type: object
+                            description: Secret supplying apiKey. Referenced, never copied.
+                            required:
+                            - name
+                            - key
+                            properties:
+                              name:
+                                type: string
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                maxLength: 253
+                                description: Secret name.
+                              key:
+                                type: string
+                                pattern: ^[-._a-zA-Z0-9]+$
+                                description: Key within the Secret.
                           apiKeyHeader:
                             type: string
                             default: X-API-Key
@@ -2161,10 +2297,44 @@ spec:
                             type: string
                           bearerToken:
                             type: string
-                            description: Bearer token (use secret:// ref in production)
+                            description: 'Deprecated: inline credentials are published into the connector
+                              ConfigMap. Use bearerTokenSecretRef.'
+                          bearerTokenSecretRef:
+                            type: object
+                            description: Secret supplying bearerToken. Referenced, never copied.
+                            required:
+                            - name
+                            - key
+                            properties:
+                              name:
+                                type: string
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                maxLength: 253
+                                description: Secret name.
+                              key:
+                                type: string
+                                pattern: ^[-._a-zA-Z0-9]+$
+                                description: Key within the Secret.
                           apiKey:
                             type: string
-                            description: API key (use secret:// ref in production)
+                            description: 'Deprecated: inline credentials are published into the connector
+                              ConfigMap. Use apiKeySecretRef.'
+                          apiKeySecretRef:
+                            type: object
+                            description: Secret supplying apiKey. Referenced, never copied.
+                            required:
+                            - name
+                            - key
+                            properties:
+                              name:
+                                type: string
+                                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                                maxLength: 253
+                                description: Secret name.
+                              key:
+                                type: string
+                                pattern: ^[-._a-zA-Z0-9]+$
+                                description: Key within the Secret.
                           apiKeyHeader:
                             type: string
                             default: X-API-Key
@@ -3013,6 +3183,26 @@ spec:
                     format: uri
                   apiKey:
                     type: string
+                    description: 'Deprecated: an inline credential is stored in plaintext in etcd and
+                      in whatever repository holds this object. Use apiKeySecretRef.'
+                  apiKeySecretRef:
+                    type: object
+                    description: Secret holding the upstream API key. The controller injects it into the
+                      gateway as an environment variable and renders os.environ/... into the config, so
+                      the value is never written to a ConfigMap.
+                    required:
+                    - name
+                    - key
+                    properties:
+                      name:
+                        type: string
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        maxLength: 253
+                        description: Secret name.
+                      key:
+                        type: string
+                        pattern: ^[-._a-zA-Z0-9]+$
+                        description: Key within the Secret.
                   apiVersion:
                     type: string
                   customLlmProvider:
@@ -3199,6 +3389,26 @@ spec:
                           - Secret
                           default: ConfigMap
                           type: string
+                  secrets:
+                    type: object
+                    description: Environment variables injected from Secrets.
+                    additionalProperties:
+                      type: object
+                      description: A key inside a Secret in the same namespace. Credentials belong here,
+                        never inline in a spec that lands in git and etcd.
+                      required:
+                      - name
+                      - key
+                      properties:
+                        name:
+                          type: string
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          maxLength: 253
+                          description: Secret name.
+                        key:
+                          type: string
+                          pattern: ^[-._a-zA-Z0-9]+$
+                          description: Key within the Secret.
               replicas:
                 type: integer
                 minimum: 0
@@ -3917,6 +4127,26 @@ spec:
                       - Secret
                       default: ConfigMap
                       type: string
+              secrets:
+                type: object
+                description: Environment variables injected from Secrets.
+                additionalProperties:
+                  type: object
+                  description: A key inside a Secret in the same namespace. Credentials belong here, never
+                    inline in a spec that lands in git and etcd.
+                  required:
+                  - name
+                  - key
+                  properties:
+                    name:
+                      type: string
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      maxLength: 253
+                      description: Secret name.
+                    key:
+                      type: string
+                      pattern: ^[-._a-zA-Z0-9]+$
+                      description: Key within the Secret.
             x-kubernetes-validations:
             - rule: self.runtimeKind != 'cron' || has(self.schedule)
               message: schedule is required when runtimeKind is cron
@@ -5006,6 +5236,26 @@ spec:
                           - Secret
                           default: ConfigMap
                           type: string
+                  secrets:
+                    type: object
+                    description: Environment variables injected from Secrets.
+                    additionalProperties:
+                      type: object
+                      description: A key inside a Secret in the same namespace. Credentials belong here,
+                        never inline in a spec that lands in git and etcd.
+                      required:
+                      - name
+                      - key
+                      properties:
+                        name:
+                          type: string
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          maxLength: 253
+                          description: Secret name.
+                        key:
+                          type: string
+                          pattern: ^[-._a-zA-Z0-9]+$
+                          description: Key within the Secret.
             required:
             - modelName
             - modelHub
@@ -6107,6 +6357,26 @@ spec:
                       - Secret
                       default: ConfigMap
                       type: string
+              secrets:
+                type: object
+                description: Environment variables injected from Secrets.
+                additionalProperties:
+                  type: object
+                  description: A key inside a Secret in the same namespace. Credentials belong here, never
+                    inline in a spec that lands in git and etcd.
+                  required:
+                  - name
+                  - key
+                  properties:
+                    name:
+                      type: string
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      maxLength: 253
+                      description: Secret name.
+                    key:
+                      type: string
+                      pattern: ^[-._a-zA-Z0-9]+$
+                      description: Key within the Secret.
             x-kubernetes-validations:
             - rule: self.tools.all(t, self.tools.filter(o, o.name == t.name).size() == 1)
               message: tool names must be unique within a tool server
@@ -6679,6 +6949,26 @@ spec:
                           iops:
                             type: integer
                             minimum: 0
+                  secrets:
+                    type: object
+                    description: Environment variables injected from Secrets.
+                    additionalProperties:
+                      type: object
+                      description: A key inside a Secret in the same namespace. Credentials belong here,
+                        never inline in a spec that lands in git and etcd.
+                      required:
+                      - name
+                      - key
+                      properties:
+                        name:
+                          type: string
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          maxLength: 253
+                          description: Secret name.
+                        key:
+                          type: string
+                          pattern: ^[-._a-zA-Z0-9]+$
+                          description: Key within the Secret.
                 description: The image that performs the work, and the compute it needs.
               execution:
                 type: object

@@ -144,6 +144,7 @@ Runs a developer's agent image as a Kubernetes workload.
 | `schedule` | `schedule` |  | Only meaningful when runtime_kind is cron. |
 | `health` | `health` |  | Readiness probe for the harness container. |
 | `files` | object |  | Files written into the container from a ConfigMap or Secret. The key is the mount path. |
+| `secrets` | `secretEnv` |  | Environment variables injected from Secrets. |
 
 Enforced by the API server as CEL validation rules:
 
@@ -298,6 +299,7 @@ Runs an image that serves tools over HTTP or gRPC, and publishes their contracts
 | `permissions` | `permissions` |  | Scopes and roles required to call these tools. |
 | `monitoring` | `monitoring` |  | Logging and metric collection for tool calls. |
 | `files` | object |  | Files written into the container from a ConfigMap or Secret. The key is the mount path. |
+| `secrets` | `secretEnv` |  | Environment variables injected from Secrets. |
 
 Enforced by the API server as CEL validation rules:
 

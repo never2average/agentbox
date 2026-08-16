@@ -580,6 +580,33 @@
         }
       },
       "additionalProperties": false
+    },
+    "secretKeyRef": {
+      "type": "object",
+      "description": "A key inside a Secret in the same namespace. Credentials belong here, never inline in a spec that lands in git and etcd.",
+      "required": [
+        "name",
+        "key"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/dnsName",
+          "description": "Secret name."
+        },
+        "key": {
+          "type": "string",
+          "pattern": "^[-._a-zA-Z0-9]+$",
+          "description": "Key within the Secret."
+        }
+      },
+      "additionalProperties": false
+    },
+    "secretEnv": {
+      "type": "object",
+      "description": "Environment variables sourced from Secrets. The key is the variable name; the value says which Secret key supplies it.",
+      "additionalProperties": {
+        "$ref": "#/definitions/secretKeyRef"
+      }
     }
   }
 }

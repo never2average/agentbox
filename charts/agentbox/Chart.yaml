@@ -1,0 +1,12 @@
+apiVersion: v2
+name: agentbox
+description: Kubernetes primitives for running a company-wide AI stack
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/never2average/agentbox
+sources:
+  - https://github.com/never2average/agentbox
+keywords: [ai, agents, llm, platform, crd, operator]
+maintainers:
+  - name: never2average

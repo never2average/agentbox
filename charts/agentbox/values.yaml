@@ -1,0 +1,41 @@
+controller:
+  image:
+    repository: ghcr.io/never2average/agentbox-controller
+    tag: ""          # defaults to the chart's appVersion
+    pullPolicy: IfNotPresent
+
+  # Two replicas is safe: leader election keeps the standby idle.
+  replicas: 2
+  leaderElect: true
+
+  # Namespace to watch. Empty means every namespace.
+  watchNamespace: ""
+
+  resyncSeconds: 60
+  workers: 4
+  logLevel: INFO
+
+  # Point this at Prometheus to drive autoscalers, meters and guardrails from
+  # real metrics. Without it, values come from the agentbox-metrics ConfigMap
+  # in each namespace.
+  prometheusUrl: ""
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  name: agentbox-controller
+  annotations: {}

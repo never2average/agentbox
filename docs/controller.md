@@ -39,6 +39,25 @@ kubectl -n agentbox-system logs -l app.kubernetes.io/name=agentbox-controller -f
 Every child carries an owner reference back to its AgentBox object. Delete the object and
 Kubernetes garbage-collects everything it made — no finalizers, nothing to get stuck.
 
+## Credentials
+
+Nothing that runs reads a credential out of a spec. Every kind that runs a pod takes
+`spec.secrets` — a map of environment variable name to `{name, key}` in a Secret — and the
+controller turns those into `valueFrom.secretKeyRef` on the container.
+
+`Gateway.litellmParams.apiKeySecretRef` is the same idea for the upstream provider key: the
+published config gets `os.environ/AGENTBOX_GATEWAY_API_KEY`, which is LiteLLM's own syntax,
+and the value is injected into the pod from the Secret.
+
+A `Dataset` does not run anything, so its connector config is published as a ConfigMap for
+consumers to read. Anything that looks like a credential is **redacted** on the way out,
+and `status.redactedFields` names what was stripped. Use the `*SecretRef` variants and the
+reference is published instead, for the consumer to resolve itself.
+
+The inline fields still exist and still validate, because removing them would be a breaking
+change — but they are marked deprecated, and the controller will not copy their values
+anywhere.
+
 ## Where metric values come from
 
 Autoscalers, meters and guardrails all need numbers. Two sources, tried in order:

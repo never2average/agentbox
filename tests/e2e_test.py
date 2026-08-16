@@ -1772,6 +1772,101 @@ def test_demo_real_request(context, namespace, kubeconfig):
     return ok
 
 
+
+# -------------------------------------------------------------------------- 11
+def test_credentials_by_reference(context, namespace, kubeconfig):
+    """
+    Credentials must be referenced, never typed into a spec that lands in git
+    and etcd, and never copied into a ConfigMap anything can read.
+    """
+    ok = True
+    kubectl("create", "secret", "generic", "upstream-credentials",
+            "--from-literal=apiKey=sk-live-do-not-leak",
+            "--from-literal=token=bearer-do-not-leak",
+            "-n", namespace, context=context, check=False)
+
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Gateway",
+           "metadata": {"name": "secure-gateway"},
+           "spec": {"modelName": "secure", "replicas": 1,
+                    "litellmParams": {"model": "openai/secure", "apiBase": "http://x/v1",
+                                      "apiKeySecretRef": {"name": "upstream-credentials",
+                                                          "key": "apiKey"}},
+                    "modelInfo": {"id": "secure", "mode": "chat"},
+                    "serving": {"image": "busybox:1.36", "port": 4000,
+                                "compute": {"cpu": {"cores": 0.05, "memoryMb": 32}},
+                                "secrets": {"EXTRA_TOKEN": {"name": "upstream-credentials",
+                                                            "key": "token"}}}}},
+          context, namespace)
+    _run_controller(kubeconfig, namespace)
+
+    _, config, _ = kubectl("get", "configmap", "secure-gateway-config", "-n", namespace,
+                           "-o", "json", context=context)
+    ok &= record("the gateway config never contains the credential",
+                 PASS if "sk-live-do-not-leak" not in config else FAIL, "the key leaked")
+
+    rendered = json.loads(json.loads(config)["data"]["config.json"])
+    api_key = rendered["model_list"][0]["litellm_params"].get("api_key")
+    ok &= record("the config points LiteLLM at an environment variable",
+                 PASS if api_key == "os.environ/AGENTBOX_GATEWAY_API_KEY" else FAIL,
+                 str(api_key))
+
+    _, env, _ = kubectl("get", "deployment", "secure-gateway", "-n", namespace,
+                        "-o", "jsonpath={.spec.template.spec.containers[0].env}",
+                        context=context)
+    ok &= record("the credential reaches the pod from the Secret",
+                 PASS if "AGENTBOX_GATEWAY_API_KEY" in env and "upstream-credentials" in env
+                 and "sk-live-do-not-leak" not in env else FAIL, env[:220])
+    ok &= record("declared secrets become environment variables too",
+                 PASS if "EXTRA_TOKEN" in env else FAIL, env[:220])
+
+    gateway = _status_of(context, namespace, "gateways", "secure-gateway")
+    ok &= record("status names the Secret the credential came from",
+                 PASS if gateway.get("credentialFrom") == "upstream-credentials" else FAIL,
+                 json.dumps(gateway)[:180])
+
+    # a dataset with an inline credential must not publish it
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Dataset",
+           "metadata": {"name": "leaky-dataset"},
+           "spec": {"name": "leaky", "type": "httpPoll", "direction": "source",
+                    "enabled": True,
+                    "config": {"httpPoll": {"url": "https://api.example.com/x",
+                                            "method": "GET", "intervalSeconds": 60,
+                                            "auth": {"type": "bearer",
+                                                     "bearerToken": "inline-do-not-leak"}}}}},
+          context, namespace)
+    _run_controller(kubeconfig, namespace)
+
+    _, published, _ = kubectl("get", "configmap", "leaky-dataset-connector", "-n", namespace,
+                              "-o", "json", context=context)
+    ok &= record("an inline dataset credential is redacted before publishing",
+                 PASS if "inline-do-not-leak" not in published else FAIL, "the token leaked")
+
+    dataset = _status_of(context, namespace, "datasets", "leaky-dataset")
+    ok &= record("status says which fields were redacted",
+                 PASS if dataset.get("redactedFields") == ["bearerToken"] else FAIL,
+                 json.dumps(dataset)[:180])
+
+    # the same dataset by reference publishes the reference, not a value
+    apply({"apiVersion": "ai.agentbox.io/v1beta1", "kind": "Dataset",
+           "metadata": {"name": "referenced-dataset"},
+           "spec": {"name": "referenced", "type": "httpPoll", "direction": "source",
+                    "enabled": True,
+                    "config": {"httpPoll": {"url": "https://api.example.com/x",
+                                            "method": "GET", "intervalSeconds": 60,
+                                            "auth": {"type": "bearer",
+                                                     "bearerTokenSecretRef": {
+                                                         "name": "upstream-credentials",
+                                                         "key": "token"}}}}}},
+          context, namespace)
+    _run_controller(kubeconfig, namespace)
+    _, published, _ = kubectl("get", "configmap", "referenced-dataset-connector",
+                              "-n", namespace, "-o", "json", context=context)
+    ok &= record("a referenced dataset credential publishes only the reference",
+                 PASS if "upstream-credentials" in published
+                 and "bearer-do-not-leak" not in published else FAIL, "unexpected content")
+    return ok
+
+
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
@@ -1875,6 +1970,8 @@ def main():
         ("leader election", test_leader_election,
          (args.context, args.namespace, args.kubeconfig)),
         ("watch loop", test_controller_watch_loop,
+         (args.context, args.namespace, args.kubeconfig)),
+        ("credentials by reference", test_credentials_by_reference,
          (args.context, args.namespace, args.kubeconfig)),
         ("controller idempotence", test_controller_idempotent,
          (args.context, args.namespace, args.kubeconfig)),

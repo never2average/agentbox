@@ -37,10 +37,27 @@ that proves the loop with real processes.
 - Metric values from Prometheus, or from an `agentbox-metrics` ConfigMap for clusters
   that do not have a metrics stack yet
 
+### Credentials
+
+- `spec.secrets` on every kind that runs a pod: environment variables sourced from Secret
+  keys, injected as `valueFrom.secretKeyRef`
+- `Gateway.litellmParams.apiKeySecretRef`: the published config carries
+  `os.environ/AGENTBOX_GATEWAY_API_KEY`, and the value reaches the pod from the Secret
+- `Dataset` auth takes `*SecretRef` variants; anything inline is redacted before the
+  connector config is published, and `status.redactedFields` names what was stripped
+- The inline credential fields still validate but are deprecated
+
 ### Installing
 
 ```bash
 kubectl apply -f https://github.com/never2average/agentbox/releases/download/v0.1.0/install.yaml
+```
+
+or with Helm:
+
+```bash
+helm install agentbox oci://ghcr.io/never2average/charts/agentbox \
+  --namespace agentbox-system --create-namespace
 ```
 
 ### Also included
@@ -48,7 +65,9 @@ kubectl apply -f https://github.com/never2average/agentbox/releases/download/v0.
 - `examples/demo.yaml` — an agent, gateway, model and tool server that actually run and
   actually talk to each other, with no registry required
 - `k8s_modules/` — a Python CRUD layer for clusters where CRDs cannot be installed
-- `tests/e2e_test.py` — 244 assertions against a live API server
+- `charts/agentbox` — a Helm chart, for teams that install nothing else
+- `ai-ctl agentbox status` — one view of the fleet across namespaces
+- `tests/e2e_test.py` — 252 assertions against a live API server
 - `docs/test-cases.md` — 186 catalogued cases, marked automated or not
 
 ### Known limitations

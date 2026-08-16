@@ -152,6 +152,10 @@
         },
         "compute": {
           "$ref": "common-schema.json#/definitions/computeResources"
+        },
+        "secrets": {
+          "$ref": "common-schema.json#/definitions/secretEnv",
+          "description": "Environment variables injected from Secrets."
         }
       },
       "additionalProperties": false

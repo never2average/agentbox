@@ -261,11 +261,19 @@
         },
         "bearerToken": {
           "type": "string",
-          "description": "Bearer token (use secret:// ref in production)"
+          "description": "Deprecated: inline credentials are published into the connector ConfigMap. Use bearerTokenSecretRef."
+        },
+        "bearerTokenSecretRef": {
+          "$ref": "common-schema.json#/definitions/secretKeyRef",
+          "description": "Secret supplying bearerToken. Referenced, never copied."
         },
         "apiKey": {
           "type": "string",
-          "description": "API key (use secret:// ref in production)"
+          "description": "Deprecated: inline credentials are published into the connector ConfigMap. Use apiKeySecretRef."
+        },
+        "apiKeySecretRef": {
+          "$ref": "common-schema.json#/definitions/secretKeyRef",
+          "description": "Secret supplying apiKey. Referenced, never copied."
         },
         "apiKeyHeader": {
           "type": "string",

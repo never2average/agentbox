@@ -226,6 +226,14 @@ spec:
     files:
       /programs: { name: demo-programs }
 ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: demo-upstream
+stringData:
+  # A real upstream key goes here. Never in the Gateway object.
+  apiKey: not-a-real-key
+---
 apiVersion: ai.agentbox.io/v1beta1
 kind: Gateway
 metadata:
@@ -235,6 +243,11 @@ spec:
   litellmParams:
     model: openai/demo-small
     apiBase: http://demo-small.agentbox-demo.svc:8000
+    # Referenced, never inlined: the controller injects it into the gateway pod
+    # and renders os.environ/... into the config it publishes.
+    apiKeySecretRef:
+      name: demo-upstream
+      key: apiKey
   modelInfo:
     id: demo-small
     mode: chat

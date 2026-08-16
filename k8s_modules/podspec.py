@@ -83,7 +83,8 @@ def container(
     port_names: Optional[List[str]] = None,
     with_probe: bool = True,
     code_key: str = 'code',
-    volume_mounts: Optional[List[client.V1VolumeMount]] = None
+    volume_mounts: Optional[List[client.V1VolumeMount]] = None,
+    secrets: Optional[Dict[str, Any]] = None
 ) -> client.V1Container:
     """
     Build the container that runs an AgentBox workload.
@@ -119,6 +120,14 @@ def container(
     ]
     for key, value in (spec.get('env') or code.get('env') or {}).items():
         result.env.append(client.V1EnvVar(name=key, value=str(value)))
+
+    # credentials arrive by reference, never as a literal in the spec
+    for name, source in sorted((secrets or spec.get('secrets') or {}).items()):
+        result.env.append(client.V1EnvVar(
+            name=name,
+            value_from=client.V1EnvVarSource(
+                secret_key_ref=client.V1SecretKeySelector(
+                    name=source['name'], key=source['key']))))
 
     if ports:
         names = port_names or [f"port-{p}" for p in ports]

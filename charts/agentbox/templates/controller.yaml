@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentbox-controller
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "agentbox.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.controller.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "agentbox.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels: {{- include "agentbox.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "agentbox.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: controller
+          image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+          args:
+            - --resync-seconds={{ .Values.controller.resyncSeconds }}
+            - --workers={{ .Values.controller.workers }}
+            - --log-level={{ .Values.controller.logLevel }}
+            {{- if .Values.controller.leaderElect }}
+            - --leader-elect
+            - --leader-elect-namespace={{ .Release.Namespace }}
+            {{- end }}
+            {{- with .Values.controller.watchNamespace }}
+            - --namespace={{ . }}
+            {{- end }}
+            {{- with .Values.controller.prometheusUrl }}
+            - --prometheus-url={{ . }}
+            {{- end }}
+          resources: {{- toYaml .Values.controller.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      {{- with .Values.controller.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

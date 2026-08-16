@@ -14,6 +14,7 @@ from controller.context import Context, logger
 from k8s_modules import podspec
 
 RUN_ANNOTATION = "agentbox.io/run"
+GATEWAY_KEY_ENV = "AGENTBOX_GATEWAY_API_KEY"
 LAST_RUN_ANNOTATION = "agentbox.io/last-run"
 
 
@@ -311,7 +312,8 @@ def reconcile_model(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]:
                                    "env": serving.get("env", {}),
                                    "health": serving.get("health", {})},
                             "model", ports=[port], port_names=["http"],
-                            volume_mounts=volume_mounts)
+                            volume_mounts=volume_mounts,
+                            secrets=serving.get("secrets"))
     deployment = podspec.deployment(
         name, namespace, labels, spec.get("replicas", serving.get("replicas", 1)), [box],
         owner, volumes)
@@ -354,7 +356,18 @@ def reconcile_gateway(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]:
     owner = children.owner_reference(resource)
     labels = children.labels_for(resource, "gateway")
 
-    params = {k: v for k, v in spec.get("litellmParams", {}).items() if k != "apiKey"}
+    declared = spec.get("litellmParams", {})
+    params = {k: v for k, v in declared.items()
+              if k not in ("apiKey", "apiKeySecretRef")}
+
+    # The credential is referenced, not copied. LiteLLM reads os.environ/NAME,
+    # and the controller injects NAME into the pod from the Secret.
+    api_key_ref = declared.get("apiKeySecretRef")
+    gateway_secrets = {}
+    if api_key_ref:
+        params["apiKey"] = f"os.environ/{GATEWAY_KEY_ENV}"
+        gateway_secrets[GATEWAY_KEY_ENV] = api_key_ref
+
     enforcement = _enforcement_for(ctx, name, namespace)
     config = {
         "model_list": [{
@@ -378,6 +391,7 @@ def reconcile_gateway(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]:
             [status.condition(status.READY, True, "ConfigPublished")],
             configMap=f"{name}-config",
             upstream=params.get("model"),
+            credentialFrom=api_key_ref["name"] if api_key_ref else None,
             enforcing=[e["source"] for e in enforcement],
         )
 
@@ -385,11 +399,13 @@ def reconcile_gateway(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]:
     files = dict(serving.get("files") or {})
     files.setdefault("/etc/agentbox", {"name": f"{name}-config"})
     volumes, volume_mounts = podspec.mounts(files)
+    secrets = dict(serving.get("secrets") or {})
+    secrets.update(gateway_secrets)
     box = podspec.container(name, {"code": serving, "compute": serving.get("compute", {}),
                                    "env": serving.get("env", {}),
                                    "health": serving.get("health", {})},
                             "gateway", ports=[port], port_names=["http"],
-                            volume_mounts=volume_mounts)
+                            volume_mounts=volume_mounts, secrets=secrets)
     children.ensure_deployment(ctx, podspec.deployment(
         name, namespace, labels, serving.get("replicas", 1), [box], owner, volumes))
     children.ensure_service(ctx, podspec.service(
@@ -405,6 +421,7 @@ def reconcile_gateway(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]:
                           if state == "active" else "WaitingForPods")],
         configMap=f"{name}-config",
         upstream=params.get("model"),
+        credentialFrom=api_key_ref["name"] if api_key_ref else None,
         address=f"{name}.{namespace}.svc:{port}",
         replicas=counts["replicas"],
         readyReplicas=counts["readyReplicas"],

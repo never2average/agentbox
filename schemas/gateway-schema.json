@@ -119,6 +119,10 @@
                 },
                 "additionalProperties": false
               }
+            },
+            "secrets": {
+              "$ref": "common-schema.json#/definitions/secretEnv",
+              "description": "Environment variables injected from Secrets."
             }
           },
           "additionalProperties": false
@@ -165,7 +169,12 @@
           "$ref": "./common-schema.json#/definitions/uri"
         },
         "apiKey": {
-          "type": "string"
+          "type": "string",
+          "description": "Deprecated: an inline credential is stored in plaintext in etcd and in whatever repository holds this object. Use apiKeySecretRef."
+        },
+        "apiKeySecretRef": {
+          "$ref": "common-schema.json#/definitions/secretKeyRef",
+          "description": "Secret holding the upstream API key. The controller injects it into the gateway as an environment variable and renders os.environ/... into the config, so the value is never written to a ConfigMap."
         },
         "apiVersion": {
           "type": "string"

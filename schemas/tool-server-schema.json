@@ -119,6 +119,10 @@
             },
             "additionalProperties": false
           }
+        },
+        "secrets": {
+          "$ref": "common-schema.json#/definitions/secretEnv",
+          "description": "Environment variables injected from Secrets."
         }
       },
       "additionalProperties": false,

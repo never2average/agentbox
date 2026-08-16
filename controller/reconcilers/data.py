@@ -9,6 +9,40 @@ from typing import Any, Dict, List, Set
 from controller import children, status
 from controller.context import Context
 
+CREDENTIAL_FIELDS = ("bearerToken", "apiKey", "password", "secretAccessKey",
+                     "privateKey", "clientSecret")
+
+
+def redact(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Strip inline credentials before publishing a connector config.
+
+    The published ConfigMap is readable by anything in the namespace, so a
+    credential typed into a spec must not be copied into it. References are
+    kept: a consumer resolves the Secret itself.
+
+    Args:
+        config: The connector config from the spec
+
+    Returns:
+        The same config with credential values replaced by a marker
+    """
+    if not isinstance(config, dict):
+        return config
+
+    cleaned = {}
+    for key, value in config.items():
+        if key in CREDENTIAL_FIELDS and isinstance(value, str):
+            cleaned[key] = "<redacted: move this to a SecretRef>"
+        elif isinstance(value, dict):
+            cleaned[key] = redact(value)
+        elif isinstance(value, list):
+            cleaned[key] = [redact(v) if isinstance(v, dict) else v for v in value]
+        else:
+            cleaned[key] = value
+    return cleaned
+
+
 CONNECTOR_ADDRESS = {
     "httpPoll": lambda c: c.get("url"),
     "webhook": lambda c: c.get("path"),
@@ -48,7 +82,7 @@ def reconcile_dataset(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]:
         "type": kind,
         "direction": spec["direction"],
         "address": address,
-        "config": config,
+        "config": redact(config),
         "stateManagement": spec.get("stateManagement", {}),
     }
 
@@ -67,7 +101,23 @@ def reconcile_dataset(ctx: Context, resource: Dict[str, Any]) -> Dict[str, Any]:
                           if config else "ConfigEmpty")],
         connectorConfigMap=f"{name}-connector",
         address=address,
-        checkpointing=checkpointing)
+        checkpointing=checkpointing,
+        redactedFields=sorted(_credentials_in(config)) or None)
+
+
+def _credentials_in(config: Dict[str, Any], found=None) -> set:
+    """Names of inline credential fields found in a connector config."""
+    found = set() if found is None else found
+    if isinstance(config, dict):
+        for key, value in config.items():
+            if key in CREDENTIAL_FIELDS and isinstance(value, str):
+                found.add(key)
+            else:
+                _credentials_in(value, found)
+    elif isinstance(config, list):
+        for value in config:
+            _credentials_in(value, found)
+    return found
 
 
 # --------------------------------------------------------------------- Recipe

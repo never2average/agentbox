@@ -257,6 +257,7 @@ Honest state of the world, so nobody is surprised:
 | ✅ | **Autoscaling that works**, on the HorizontalPodAutoscaler formula with a tolerance band, stabilization windows and scale-to-zero |
 | ✅ | **Metering that computes** — flat, per-unit and tiered pricing, budget thresholds, breach events |
 | ✅ | **Python CRUD layer** for every kind, for clusters where you cannot install CRDs |
+| ✅ | **Credentials by reference.** `spec.secrets` and `apiKeySecretRef` inject from Secrets; published configs redact anything inline |
 | ✅ | **Enforcement reaches the data plane.** A tripped Guardrail or a spent budget lands in the Gateway's config, and the gateway refuses traffic |
 | ✅ | **Verified end to end** against a live API server, including a real request through a real gateway to a real model ([`tests/e2e_test.py`](tests/e2e_test.py)) |
 | 🚧 | **No admission webhook.** Validation happens at the API server via the CRD schemas and CEL rules, not through defaulting/mutating webhooks |
@@ -288,6 +289,7 @@ The reasoning in full: **[docs/design.md](docs/design.md)**.
 
 ```
 schemas/       JSON Schema source of truth, one file per CRD + common definitions
+charts/        Helm chart, for teams that install nothing else
 examples/      A runnable demo: agent, gateway, model, tool server
 crds/          Generated CustomResourceDefinition manifests (kubectl apply -k crds/)
 controller/    The reconciler: one function per kind, plus the watch loop

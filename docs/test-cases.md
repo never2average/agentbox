@@ -2,7 +2,7 @@
 
 Everything worth running against the AgentBox CRDs, whether or not it is automated yet.
 
-`tests/e2e_test.py` currently automates 244 assertions against a live API server. This is
+`tests/e2e_test.py` currently automates 252 assertions against a live API server. This is
 the wider catalogue: what that suite covers, and what a serious production rollout would
 want on top of it.
 

@@ -108,7 +108,7 @@ and registry agree — that is the point.
 applies every reference example, checks that 16 bad specs are rejected, exercises the scale
 and status subresources, drives the Python managers through CRUD, and runs the controller —
 asserting that it builds every child with the right owner, scales targets by the HPA
-formula, prices usage against budgets and trips guardrails. 244 assertions.
+formula, prices usage against budgets and trips guardrails. 252 assertions.
 
 ```bash
 kind create cluster --name agentbox-e2e --kubeconfig /tmp/agentbox-kubeconfig

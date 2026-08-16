@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 from agents import cluster_query, rca_researcher, implementation_in_cluster
 from k8s_modules import connection
+from k8s_modules.registry import CRD_KINDS
 
 
 # Configuration directory for storing cluster configs
@@ -282,6 +283,91 @@ def list_clusters():
         click.echo(click.style(f"❌ Error listing clusters: {str(e)}", fg='red'))
 
 
+
+@cli.group('agentbox')
+def agentbox_group():
+    """Inspect the AgentBox fleet."""
+    pass
+
+
+@agentbox_group.command('status')
+@click.option('--namespace', '-n', help='Namespace to inspect; all namespaces by default')
+@click.option('--kind', '-k', help='Limit to one kind, e.g. HarnessRuntime')
+def agentbox_status(namespace: Optional[str], kind: Optional[str]):
+    """
+    One view of every AgentBox resource and what it is doing.
+
+    Examples:
+        ai-ctl agentbox status
+        ai-ctl agentbox status -n agents
+        ai-ctl agentbox status -k HarnessRuntime
+    """
+    from kubernetes import client
+
+    try:
+        clusters_data = load_clusters()
+        kubeconfig_path = get_active_cluster_kubeconfig(clusters_data)
+    except Exception as e:
+        click.echo(click.style(f"No cluster configured: {e}", fg='red'))
+        return
+
+    connection.load_kubeconfig(kubeconfig_path)
+    api = client.CustomObjectsApi()
+
+    groups = {g: k for g, k in CRD_KINDS.items()
+              if not kind or k.lower() == kind.lower()}
+    if not groups:
+        click.echo(click.style(f"Unknown kind: {kind}", fg='red'))
+        return
+
+    rows = []
+    for group, crd_kind in groups.items():
+        plural = crd_kind.lower() + 's'
+        try:
+            if namespace:
+                result = api.list_namespaced_custom_object(
+                    'ai.agentbox.io', 'v1beta1', namespace, plural)
+            else:
+                result = api.list_cluster_custom_object('ai.agentbox.io', 'v1beta1', plural)
+        except client.exceptions.ApiException as e:
+            if e.status == 404:
+                continue
+            click.echo(click.style(f"  {crd_kind}: {e.reason}", fg='yellow'))
+            continue
+
+        for item in result.get('items', []):
+            status = item.get('status') or {}
+            rows.append({
+                'kind': crd_kind,
+                'namespace': item['metadata'].get('namespace', ''),
+                'name': item['metadata']['name'],
+                'state': status.get('state', 'unknown'),
+                'message': status.get('message', ''),
+            })
+
+    if not rows:
+        click.echo("No AgentBox resources found. Is the CRD set installed?")
+        return
+
+    colour = {'active': 'green', 'completed': 'green', 'pending': 'yellow',
+              'degraded': 'yellow', 'suspended': 'cyan', 'inactive': 'cyan',
+              'failed': 'red', 'unknown': 'white'}
+
+    width = max(len(r['kind']) for r in rows)
+    name_width = min(32, max(len(r['name']) for r in rows))
+    click.echo()
+    for row in sorted(rows, key=lambda r: (r['kind'], r['namespace'], r['name'])):
+        state = click.style(f"{row['state']:<10}", fg=colour.get(row['state'], 'white'))
+        message = row['message'][:60]
+        click.echo(f"  {row['kind']:<{width}}  {row['namespace']:<16}  "
+                   f"{row['name']:<{name_width}}  {state}  {message}")
+
+    counts = {}
+    for row in rows:
+        counts[row['state']] = counts.get(row['state'], 0) + 1
+    summary = ', '.join(f"{n} {s}" for s, n in sorted(counts.items()))
+    click.echo(f"\n  {len(rows)} resources: {summary}\n")
+
+
 if __name__ == '__main__':
     cli()
-

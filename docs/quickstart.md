@@ -13,11 +13,14 @@ an autoscaler.
 ## 1. Install
 
 ```bash
-git clone <this repo>
-cd agentbox
-pip install -r requirements.txt
-kubectl apply -k crds/      # the 16 CRDs
-kubectl apply -k deploy/    # the controller that reconciles them
+# everything, from a release
+kubectl apply -f https://github.com/never2average/agentbox/releases/latest/download/install.yaml
+
+# or with Helm
+helm install agentbox oci://ghcr.io/never2average/charts/agentbox --namespace agentbox-system --create-namespace
+
+# or from a clone
+kubectl apply -k crds/ && kubectl apply -k deploy/
 ```
 
 Check what landed:
@@ -53,11 +56,24 @@ spec:
     rpm: 10000
     tpm: 1000000
     timeout: 600
+    # credentials by reference, never inline
+    apiKeySecretRef:
+      name: provider-credentials
+      key: apiKey
   modelInfo:
     id: llama-3-70b-instruct
     mode: chat
     supportsFunctionCalling: true
 ```
+
+```bash
+kubectl create secret generic provider-credentials --from-literal=apiKey=sk-...
+```
+
+The controller injects that key into the gateway pod and renders
+`os.environ/AGENTBOX_GATEWAY_API_KEY` into the config it publishes, so the value
+never lands in a ConfigMap, in etcd as part of this object, or in the repository
+that holds it.
 
 Swapping to Bedrock later is a change to this object, not to any image.
 
